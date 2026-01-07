@@ -1,0 +1,2216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Facturas - Control Financiero</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #ff6600;
+            --primary-dark: #e55c00;
+            --secondary: #1a1a1a;
+            --accent: #2ecc71;
+            --danger: #e74c3c;
+            --background: #f4f6f8;
+            --surface: #ffffff;
+            --text: #333333;
+            --text-light: #666666;
+            --border: #e0e0e0;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.15);
+            --radius: 12px;
+            --transition: all 0.3s ease;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--background);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Layout */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--secondary);
+            color: white;
+            padding: 20px 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 100;
+            transition: var(--transition);
+        }
+
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .logo-img {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            object-fit: contain;
+            background: white;
+            padding: 5px;
+        }
+
+        .app-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .app-subtitle {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 5px;
+        }
+
+        .nav-menu {
+            list-style: none;
+        }
+
+        .nav-item {
+            margin: 5px 10px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            border-radius: 10px;
+            transition: var(--transition);
+            font-weight: 500;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .nav-link svg {
+            width: 22px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            margin-left: 280px;
+            padding: 30px;
+            transition: var(--transition);
+        }
+
+        /* Header */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .page-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .btn-secondary {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #333;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #27ae60;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--primary);
+            color: var(--primary);
+        }
+
+        .btn-outline:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+        }
+
+        .btn-icon {
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 25px;
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            box-shadow: var(--shadow-lg);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 25px;
+            box-shadow: var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: var(--transition);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stat-icon.income {
+            background: rgba(46, 204, 113, 0.15);
+            color: var(--accent);
+        }
+
+        .stat-icon.expense {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--danger);
+        }
+
+        .stat-icon.vat {
+            background: rgba(255, 102, 0, 0.15);
+            color: var(--primary);
+        }
+
+        .stat-icon.balance {
+            background: rgba(52, 152, 219, 0.15);
+            color: #3498db;
+        }
+
+        .stat-icon svg {
+            width: 30px;
+            height: 30px;
+        }
+
+        .stat-info h3 {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        /* Tables */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table th {
+            background: var(--background);
+            font-weight: 600;
+            color: var(--secondary);
+            white-space: nowrap;
+        }
+
+        .data-table tr:hover {
+            background: rgba(255, 102, 0, 0.05);
+        }
+
+        .data-table .actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-income {
+            background: rgba(46, 204, 113, 0.15);
+            color: var(--accent);
+        }
+
+        .badge-expense {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--danger);
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--secondary);
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: var(--transition);
+            font-family: inherit;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(255, 102, 0, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--surface);
+            border-radius: var(--radius);
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: scale(0.9);
+            transition: var(--transition);
+        }
+
+        .modal-overlay.active .modal {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            padding: 25px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: var(--background);
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        .modal-body {
+            padding: 25px;
+        }
+
+        .modal-footer {
+            padding: 20px 25px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        /* File Upload */
+        .file-upload {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .file-upload:hover {
+            border-color: var(--primary);
+            background: rgba(255, 102, 0, 0.05);
+        }
+
+        .file-upload.has-file {
+            border-color: var(--accent);
+            background: rgba(46, 204, 113, 0.05);
+        }
+
+        .file-upload svg {
+            width: 48px;
+            height: 48px;
+            color: var(--text-light);
+            margin-bottom: 15px;
+        }
+
+        .file-upload p {
+            color: var(--text-light);
+            margin-bottom: 10px;
+        }
+
+        .file-upload input {
+            display: none;
+        }
+
+        .file-name {
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        /* Report Section */
+        .report-filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 25px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-light);
+        }
+
+        /* PDF Viewer */
+        .pdf-viewer {
+            width: 100%;
+            height: 500px;
+            border: none;
+            border-radius: 10px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 25px;
+            background: var(--background);
+            padding: 5px;
+            border-radius: 10px;
+            width: fit-content;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: var(--transition);
+            color: var(--text-light);
+        }
+
+        .tab.active {
+            background: var(--surface);
+            color: var(--primary);
+            box-shadow: var(--shadow);
+        }
+
+        .tab:hover:not(.active) {
+            color: var(--secondary);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-light);
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+            color: var(--secondary);
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 2000;
+        }
+
+        .toast {
+            background: var(--secondary);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 10px;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: var(--shadow-lg);
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--accent);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--primary);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 80px;
+                padding: 20px 10px;
+            }
+
+            .sidebar-header {
+                padding: 0 10px 20px;
+            }
+
+            .logo-container {
+                justify-content: center;
+            }
+
+            .app-name, .app-subtitle, .nav-text {
+                display: none;
+            }
+
+            .nav-link {
+                justify-content: center;
+                padding: 14px;
+            }
+
+            .main-content {
+                margin-left: 80px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+
+            .sidebar.active {
+                transform: translateX(0);
+                width: 280px;
+            }
+
+            .sidebar.active .app-name,
+            .sidebar.active .app-subtitle,
+            .sidebar.active .nav-text {
+                display: block;
+            }
+
+            .sidebar.active .nav-link {
+                justify-content: flex-start;
+                padding: 14px 20px;
+            }
+
+            .main-content {
+                margin-left: 0;
+                padding: 20px;
+            }
+
+            .page-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .report-filters {
+                flex-direction: column;
+            }
+
+            .tabs {
+                width: 100%;
+                overflow-x: auto;
+            }
+
+            .modal {
+                width: 95%;
+                margin: 10px;
+            }
+        }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle {
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 150;
+            width: 44px;
+            height: 44px;
+            background: var(--primary);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: var(--shadow);
+        }
+
+        @media (max-width: 768px) {
+            .mobile-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+
+        /* Section visibility */
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        /* Calculation Preview */
+        .calc-preview {
+            background: var(--background);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 15px;
+        }
+
+        .calc-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .calc-row:last-child {
+            border-bottom: none;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--primary);
+        }
+
+        /* Quick Stats */
+        .quick-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .quick-stat {
+            background: var(--background);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .quick-stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        .quick-stat-label {
+            font-size: 0.85rem;
+            color: var(--text-light);
+            margin-top: 5px;
+        }
+
+        /* Action buttons in table */
+        .action-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .action-btn.view {
+            background: rgba(52, 152, 219, 0.15);
+            color: #3498db;
+        }
+
+        .action-btn.view:hover {
+            background: #3498db;
+            color: white;
+        }
+
+        .action-btn.delete {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--danger);
+        }
+
+        .action-btn.delete:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        .action-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-toggle" onclick="toggleSidebar()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" style="color: white;">
+            <path d="M3 12h18M3 6h18M3 18h18"/>
+        </svg>
+    </button>
+
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <img src="logo-redes_Transparente-216x216.png" alt="Logo" class="logo-img" id="logoImg">
+                    <div>
+                        <div class="app-name">Gestor de Facturas</div>
+                        <div class="app-subtitle">Control Financiero</div>
+                    </div>
+                </div>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="#" class="nav-link active" data-section="dashboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7" rx="1"/>
+                            <rect x="14" y="3" width="7" height="7" rx="1"/>
+                            <rect x="3" y="14" width="7" height="7" rx="1"/>
+                            <rect x="14" y="14" width="7" height="7" rx="1"/>
+                        </svg>
+                        <span class="nav-text">Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-section="compras">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="9" cy="21" r="1"/>
+                            <circle cx="20" cy="21" r="1"/>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+                        </svg>
+                        <span class="nav-text">Facturas de Compra</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-section="ventas">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                        <span class="nav-text">Facturas Emitidas</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-section="reportes">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                        <span class="nav-text">Reportes</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-section="backup">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span class="nav-text">Backup/Restore</span>
+                    </a>
+                </li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Section -->
+            <section class="section active" id="dashboard">
+                <div class="page-header">
+                    <h1 class="page-title">Dashboard</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-primary" onclick="openModal('compra')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            Nueva Compra
+                        </button>
+                        <button class="btn btn-success" onclick="openModal('venta')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            Nueva Venta
+                        </button>
+                    </div>
+                </div>
+
+                <div class="quick-stats">
+                    <div class="quick-stat">
+                        <div class="quick-stat-value" id="totalVentas">0.00 €</div>
+                        <div class="quick-stat-label">Total Ventas</div>
+                    </div>
+                    <div class="quick-stat">
+                        <div class="quick-stat-value" id="totalCompras">0.00 €</div>
+                        <div class="quick-stat-label">Total Compras</div>
+                    </div>
+                    <div class="quick-stat">
+                        <div class="quick-stat-value" id="ivaTrimestre">0.00 €</div>
+                        <div class="quick-stat-label">IVA del Trimestre</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon income">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                                <polyline points="17 6 23 6 23 12"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Ingresos (Base)</h3>
+                            <div class="stat-value" id="ingresosBase">0.00 €</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon expense">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                                <polyline points="17 18 23 18 23 12"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Gastos (Base)</h3>
+                            <div class="stat-value" id="gastosBase">0.00 €</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon vat">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 6v6l4 2"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>IVA Soportado</h3>
+                            <div class="stat-value" id="ivaSoportado">0.00 €</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon vat">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>IVA Repercutido</h3>
+                            <div class="stat-value" id="ivaRepercutido">0.00 €</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Últimas Facturas</h2>
+                        <button class="btn btn-outline btn-sm" onclick="showSection('compras')">Ver Todas</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Concepto</th>
+                                    <th>Tipo</th>
+                                    <th>Base</th>
+                                    <th>IVA</th>
+                                    <th>Total</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ultimasFacturas">
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="empty-state" id="emptyDashboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        <h3>No hay facturas registradas</h3>
+                        <p>Comienza añadiendo tu primera factura</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Compras Section -->
+            <section class="section" id="compras">
+                <div class="page-header">
+                    <h1 class="page-title">Facturas de Compra</h1>
+                    <button class="btn btn-primary" onclick="openModal('compra')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        Nueva Factura
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Proveedor</th>
+                                    <th>Base</th>
+                                    <th>IVA (21%)</th>
+                                    <th>Total</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaCompras">
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="empty-state" id="emptyCompras">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                            <circle cx="9" cy="21" r="1"/>
+                            <circle cx="20" cy="21" r="1"/>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+                        </svg>
+                        <h3>No hay facturas de compra</h3>
+                        <p>Añade tu primera factura de compra</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Ventas Section -->
+            <section class="section" id="ventas">
+                <div class="page-header">
+                    <h1 class="page-title">Facturas Emitidas</h1>
+                    <button class="btn btn-success" onclick="openModal('venta')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        Nueva Factura
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Cliente</th>
+                                    <th>Base</th>
+                                    <th>IVA (21%)</th>
+                                    <th>Total</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaVentas">
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="empty-state" id="emptyVentas">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                        <h3>No hay facturas emitidas</h3>
+                        <p>Añade tu primera factura emitida</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reportes Section -->
+            <section class="section" id="reportes">
+                <div class="page-header">
+                    <h1 class="page-title">Reportes</h1>
+                </div>
+                <div class="card">
+                    <h2 class="card-title" style="margin-bottom: 20px;">Generar Reporte</h2>
+                    <div class="report-filters">
+                        <div class="filter-group">
+                            <label>Tipo de Reporte</label>
+                            <select class="form-select" id="reporteTipo" onchange="updateReporteOptions()">
+                                <option value="mensual">Mensual</option>
+                                <option value="trimestral">Trimestral</option>
+                                <option value="anual">Anual</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Año</label>
+                            <select class="form-select" id="reporteYear">
+                            </select>
+                        </div>
+                        <div class="filter-group" id="periodoGroup">
+                            <label>Período</label>
+                            <select class="form-select" id="reportePeriodo">
+                            </select>
+                        </div>
+                        <div class="filter-group" style="align-self: flex-end;">
+                            <button class="btn btn-primary" onclick="generarReporte()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Generar PDF
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 20px;">
+                    <h2 class="card-title" style="margin-bottom: 20px;">Resumen del Período</h2>
+                    <div id="resumenReporte">
+                        <div class="empty-state">
+                            <p>Selecciona las opciones y genera tu reporte</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Backup Section -->
+            <section class="section" id="backup">
+                <div class="page-header">
+                    <h1 class="page-title">Backup y Restauración</h1>
+                </div>
+                <div class="card">
+                    <h2 class="card-title" style="margin-bottom: 20px;">Datos Locales</h2>
+                    <p style="color: var(--text-light); margin-bottom: 20px;">
+                        Tus datos se guardan automáticamente en tu navegador. Puedes exportarlos para hacer un backup o transferirlos a otro dispositivo.
+                    </p>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="exportarDatos()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Exportar Backup
+                        </button>
+                        <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            Importar Backup
+                        </button>
+                        <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importarDatos(event)">
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 20px;">
+                    <h2 class="card-title" style="margin-bottom: 20px;">Información del Sistema</h2>
+                    <div id="systemInfo" style="color: var(--text-light);">
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal para añadir factura -->
+    <div class="modal-overlay" id="facturaModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Nueva Factura</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="facturaForm">
+                    <input type="hidden" id="facturaId">
+                    <input type="hidden" id="facturaTipo">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Fecha</label>
+                            <input type="date" class="form-input" id="facturaFecha" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" id="proveedorLabel">Proveedor</label>
+                            <input type="text" class="form-input" id="facturaConcepto" placeholder="Nombre del proveedor/cliente" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Base Imponible (€)</label>
+                            <input type="number" class="form-input" id="facturaBase" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('base')">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">IVA (21%) (€)</label>
+                            <input type="number" class="form-input" id="facturaIVA" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('iva')">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Total (€)</label>
+                            <input type="number" class="form-input" id="facturaTotal" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('total')">
+                        </div>
+                    </div>
+                    <div class="calc-preview" id="calcPreview" style="display: none;">
+                        <div class="calc-row">
+                            <span>Base Imponible</span>
+                            <span id="previewBase">0.00 €</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>IVA (21%)</span>
+                            <span id="previewIVA">0.00 €</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>Total</span>
+                            <span id="previewTotal">0.00 €</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Archivo PDF de la Factura</label>
+                        <div class="file-upload" id="fileUpload" onclick="document.getElementById('pdfFile').click()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <p>Haz clic para subir el PDF</p>
+                            <span class="file-name" id="fileName" style="display: none;"></span>
+                            <input type="file" id="pdfFile" accept="application/pdf" onchange="handleFileSelect(event)">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="guardarFactura()">Guardar Factura</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para ver PDF -->
+    <div class="modal-overlay" id="pdfModal">
+        <div class="modal" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Visualizar Factura</h3>
+                <button class="modal-close" onclick="closePdfModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="pdfContainer" style="text-align: center;">
+                    <div class="empty-state" id="noPdfState">
+                        <p>Esta factura no tiene PDF asociado</p>
+                    </div>
+                    <iframe id="pdfViewer" class="pdf-viewer" style="display: none;"></iframe>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closePdfModal()">Cerrar</button>
+                <button class="btn btn-primary" id="downloadPdfBtn" onclick="descargarPdf()" style="display: none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Descargar PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // IndexedDB Setup
+        let db;
+        const DB_NAME = 'GestorFacturasDB';
+        const DB_VERSION = 1;
+
+        // Initialize Database
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    db = request.result;
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    const database = event.target.result;
+
+                    if (!database.objectStoreNames.contains('facturas')) {
+                        const store = database.createObjectStore('facturas', { keyPath: 'id' });
+                        store.createIndex('fecha', 'fecha', { unique: false });
+                        store.createIndex('tipo', 'tipo', { unique: false });
+                        store.createIndex('concepto', 'concepto', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // Database Operations
+        async function addFactura(factura) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readwrite');
+                const store = transaction.objectStore('facturas');
+                const request = store.add(factura);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function updateFactura(factura) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readwrite');
+                const store = transaction.objectStore('facturas');
+                const request = store.put(factura);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function deleteFactura(id) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readwrite');
+                const store = transaction.objectStore('facturas');
+                const request = store.delete(id);
+
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function getFactura(id) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readonly');
+                const store = transaction.objectStore('facturas');
+                const request = store.get(id);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function getAllFacturas() {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readonly');
+                const store = transaction.objectStore('facturas');
+                const request = store.getAll();
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function getFacturasByType(tipo) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['facturas'], 'readonly');
+                const store = transaction.objectStore('facturas');
+                const index = store.index('tipo');
+                const request = index.getAll(tipo);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Utility Functions
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('es-ES', {
+                style: 'currency',
+                currency: 'EUR'
+            }).format(amount);
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+        }
+
+        function getQuarter(date) {
+            const month = new Date(date).getMonth() + 1;
+            return Math.ceil(month / 3);
+        }
+
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        // Navigation
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const section = link.dataset.section;
+                showSection(section);
+            });
+        });
+
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+
+            document.getElementById(sectionId).classList.add('active');
+            document.querySelector(`[data-section="${sectionId}"]`).classList.add('active');
+
+            // Close mobile sidebar
+            document.getElementById('sidebar').classList.remove('active');
+
+            // Refresh data
+            if (sectionId === 'dashboard') loadDashboard();
+            if (sectionId === 'compras') loadCompras();
+            if (sectionId === 'ventas') loadVentas();
+            if (sectionId === 'reportes') initReportes();
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('active');
+        }
+
+        // Modal Functions
+        function openModal(tipo, facturaId = null) {
+            const modal = document.getElementById('facturaModal');
+            const title = document.getElementById('modalTitle');
+            const label = document.getElementById('proveedorLabel');
+            const form = document.getElementById('facturaForm');
+
+            document.getElementById('facturaTipo').value = tipo;
+            document.getElementById('facturaId').value = '';
+
+            if (tipo === 'compra') {
+                title.textContent = 'Nueva Factura de Compra';
+                label.textContent = 'Proveedor';
+            } else {
+                title.textContent = 'Nueva Factura Emitida';
+                label.textContent = 'Cliente';
+            }
+
+            // Reset form
+            form.reset();
+            document.getElementById('fileName').style.display = 'none';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('fileUpload').classList.remove('has-file');
+            document.getElementById('calcPreview').style.display = 'none';
+            document.getElementById('pdfFile').value = '';
+
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('facturaModal').classList.remove('active');
+        }
+
+        // File Handling
+        let selectedPdfBase64 = null;
+        let currentPdfBlob = null;
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.type !== 'application/pdf') {
+                    showToast('Por favor, selecciona un archivo PDF válido', 'error');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    selectedPdfBase64 = e.target.result;
+                    currentPdfBlob = file;
+
+                    const fileName = document.getElementById('fileName');
+                    fileName.textContent = file.name;
+                    fileName.style.display = 'inline';
+                    document.getElementById('fileUpload').classList.add('has-file');
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Calculation Functions
+        function calcularTotales(source) {
+            const baseInput = document.getElementById('facturaBase');
+            const ivaInput = document.getElementById('facturaIVA');
+            const totalInput = document.getElementById('facturaTotal');
+
+            let base = parseFloat(baseInput.value) || 0;
+            let iva = parseFloat(ivaInput.value) || 0;
+            let total = parseFloat(totalInput.value) || 0;
+
+            if (source === 'base') {
+                iva = base * 0.21;
+                total = base + iva;
+                ivaInput.value = iva.toFixed(2);
+                totalInput.value = total.toFixed(2);
+            } else if (source === 'iva') {
+                base = iva / 0.21;
+                total = base + iva;
+                baseInput.value = base.toFixed(2);
+                totalInput.value = total.toFixed(2);
+            } else if (source === 'total') {
+                base = total / 1.21;
+                iva = total - base;
+                baseInput.value = base.toFixed(2);
+                ivaInput.value = iva.toFixed(2);
+            }
+
+            // Update preview
+            document.getElementById('previewBase').textContent = formatCurrency(base);
+            document.getElementById('previewIVA').textContent = formatCurrency(iva);
+            document.getElementById('previewTotal').textContent = formatCurrency(total);
+            document.getElementById('calcPreview').style.display = 'block';
+        }
+
+        // Save Invoice
+        async function guardarFactura() {
+            const tipo = document.getElementById('facturaTipo').value;
+            const id = document.getElementById('facturaId').value || generateId();
+            const fecha = document.getElementById('facturaFecha').value;
+            const concepto = document.getElementById('facturaConcepto').value;
+            const base = parseFloat(document.getElementById('facturaBase').value) || 0;
+            const iva = parseFloat(document.getElementById('facturaIVA').value) || 0;
+            const total = parseFloat(document.getElementById('facturaTotal').value) || 0;
+
+            if (!fecha || !concepto) {
+                showToast('Por favor, completa todos los campos requeridos', 'error');
+                return;
+            }
+
+            const factura = {
+                id,
+                tipo,
+                fecha,
+                concepto,
+                base,
+                iva,
+                total,
+                pdf: selectedPdfBase64,
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                if (document.getElementById('facturaId').value) {
+                    await updateFactura(factura);
+                    showToast('Factura actualizada correctamente', 'success');
+                } else {
+                    await addFactura(factura);
+                    showToast('Factura guardada correctamente', 'success');
+                }
+
+                closeModal();
+                loadDashboard();
+
+                // Reset file handling
+                selectedPdfBase64 = null;
+                currentPdfBlob = null;
+            } catch (error) {
+                showToast('Error al guardar la factura', 'error');
+                console.error(error);
+            }
+        }
+
+        // Load Dashboard
+        async function loadDashboard() {
+            const facturas = await getAllFacturas();
+            
+            // Calculate totals
+            let totalVentasBase = 0;
+            let totalVentasIVA = 0;
+            let totalComprasBase = 0;
+            let totalComprasIVA = 0;
+
+            const currentDate = new Date();
+            const currentQuarter = getQuarter(currentDate);
+            const currentYear = currentDate.getFullYear();
+
+            facturas.forEach(f => {
+                const facturaYear = new Date(f.fecha).getFullYear();
+                const facturaQuarter = getQuarter(f.fecha);
+
+                if (f.tipo === 'venta') {
+                    totalVentasBase += f.base;
+                    totalVentasIVA += f.iva;
+                } else {
+                    totalComprasBase += f.base;
+                    totalComprasIVA += f.iva;
+                }
+            });
+
+            const ivaTrimestre = totalVentasIVA - totalComprasIVA;
+
+            // Update UI
+            document.getElementById('totalVentas').textContent = formatCurrency(totalVentasBase + totalVentasIVA);
+            document.getElementById('totalCompras').textContent = formatCurrency(totalComprasBase + totalComprasIVA);
+            document.getElementById('ivaTrimestre').textContent = formatCurrency(ivaTrimestre);
+            document.getElementById('ivaTrimestre').style.color = ivaTrimestre >= 0 ? 'var(--accent)' : 'var(--danger)';
+
+            document.getElementById('ingresosBase').textContent = formatCurrency(totalVentasBase);
+            document.getElementById('gastosBase').textContent = formatCurrency(totalComprasBase);
+            document.getElementById('ivaSoportado').textContent = formatCurrency(totalComprasIVA);
+            document.getElementById('ivaRepercutido').textContent = formatCurrency(totalVentasIVA);
+
+            // Load recent invoices
+            const tbody = document.getElementById('ultimasFacturas');
+            const emptyState = document.getElementById('emptyDashboard');
+
+            if (facturas.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.style.display = 'block';
+            } else {
+                emptyState.style.display = 'none';
+                const sortedFacturas = [...facturas].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 5);
+
+                tbody.innerHTML = sortedFacturas.map(f => `
+                    <tr>
+                        <td>${formatDate(f.fecha)}</td>
+                        <td>${f.concepto}</td>
+                        <td><span class="badge ${f.tipo === 'venta' ? 'badge-income' : 'badge-expense'}">${f.tipo === 'venta' ? 'Venta' : 'Compra'}</span></td>
+                        <td>${formatCurrency(f.base)}</td>
+                        <td>${formatCurrency(f.iva)}</td>
+                        <td><strong>${formatCurrency(f.total)}</strong></td>
+                        <td class="actions">
+                            ${f.pdf ? `<button class="action-btn view" onclick="verPdf('${f.id}')" title="Ver PDF">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>` : ''}
+                            <button class="action-btn delete" onclick="eliminarFactura('${f.id}')" title="Eliminar">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Load Compras
+        async function loadCompras() {
+            const facturas = await getFacturasByType('compra');
+            const tbody = document.getElementById('tablaCompras');
+            const emptyState = document.getElementById('emptyCompras');
+
+            if (facturas.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.style.display = 'block';
+            } else {
+                emptyState.style.display = 'none';
+                const sortedFacturas = [...facturas].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+                tbody.innerHTML = sortedFacturas.map(f => `
+                    <tr>
+                        <td>${formatDate(f.fecha)}</td>
+                        <td>${f.concepto}</td>
+                        <td>${formatCurrency(f.base)}</td>
+                        <td>${formatCurrency(f.iva)}</td>
+                        <td><strong>${formatCurrency(f.total)}</strong></td>
+                        <td class="actions">
+                            ${f.pdf ? `<button class="action-btn view" onclick="verPdf('${f.id}')" title="Ver PDF">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>` : ''}
+                            <button class="action-btn delete" onclick="eliminarFactura('${f.id}')" title="Eliminar">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Load Ventas
+        async function loadVentas() {
+            const facturas = await getFacturasByType('venta');
+            const tbody = document.getElementById('tablaVentas');
+            const emptyState = document.getElementById('emptyVentas');
+
+            if (facturas.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.style.display = 'block';
+            } else {
+                emptyState.style.display = 'none';
+                const sortedFacturas = [...facturas].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+                tbody.innerHTML = sortedFacturas.map(f => `
+                    <tr>
+                        <td>${formatDate(f.fecha)}</td>
+                        <td>${f.concepto}</td>
+                        <td>${formatCurrency(f.base)}</td>
+                        <td>${formatCurrency(f.iva)}</td>
+                        <td><strong>${formatCurrency(f.total)}</strong></td>
+                        <td class="actions">
+                            ${f.pdf ? `<button class="action-btn view" onclick="verPdf('${f.id}')" title="Ver PDF">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>` : ''}
+                            <button class="action-btn delete" onclick="eliminarFactura('${f.id}')" title="Eliminar">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // PDF Functions
+        function verPdf(id) {
+            getFactura(id).then(factura => {
+                if (!factura || !factura.pdf) {
+                    showToast('Esta factura no tiene PDF asociado', 'info');
+                    return;
+                }
+
+                const viewer = document.getElementById('pdfViewer');
+                const noPdfState = document.getElementById('noPdfState');
+                const downloadBtn = document.getElementById('downloadPdfBtn');
+
+                viewer.src = factura.pdf;
+                viewer.style.display = 'block';
+                noPdfState.style.display = 'none';
+                downloadBtn.style.display = 'inline-flex';
+                currentPdfBlob = null;
+
+                document.getElementById('pdfModal').classList.add('active');
+            });
+        }
+
+        function closePdfModal() {
+            document.getElementById('pdfModal').classList.remove('active');
+            document.getElementById('pdfViewer').src = '';
+        }
+
+        function descargarPdf() {
+            const viewer = document.getElementById('pdfViewer');
+            if (viewer.src) {
+                const link = document.createElement('a');
+                link.href = viewer.src;
+                link.download = 'factura.pdf';
+                link.click();
+            }
+        }
+
+        // Delete Invoice
+        async function eliminarFactura(id) {
+            if (confirm('¿Estás seguro de que deseas eliminar esta factura?')) {
+                try {
+                    await deleteFactura(id);
+                    showToast('Factura eliminada correctamente', 'success');
+                    loadDashboard();
+                } catch (error) {
+                    showToast('Error al eliminar la factura', 'error');
+                }
+            }
+        }
+
+        // Report Functions
+        function initReportes() {
+            const currentYear = new Date().getFullYear();
+            const yearSelect = document.getElementById('reporteYear');
+            
+            yearSelect.innerHTML = '';
+            for (let i = currentYear; i >= currentYear - 5; i--) {
+                yearSelect.innerHTML += `<option value="${i}">${i}</option>`;
+            }
+
+            updateReporteOptions();
+        }
+
+        function updateReporteOptions() {
+            const tipo = document.getElementById('reporteTipo').value;
+            const periodoSelect = document.getElementById('reportePeriodo');
+            const periodoGroup = document.getElementById('periodoGroup');
+
+            if (tipo === 'anual') {
+                periodoGroup.style.display = 'none';
+            } else {
+                periodoGroup.style.display = 'block';
+                periodoSelect.innerHTML = '';
+
+                if (tipo === 'mensual') {
+                    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                                   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                    meses.forEach((mes, index) => {
+                        periodoSelect.innerHTML += `<option value="${index + 1}">${mes}</option>`;
+                    });
+                } else if (tipo === 'trimestral') {
+                    const trimestres = ['Trimestre 1 (Ene-Mar)', 'Trimestre 2 (Abr-Jun)', 
+                                       'Trimestre 3 (Jul-Sep)', 'Trimestre 4 (Oct-Dic)'];
+                    trimestres.forEach((trimestre, index) => {
+                        periodoSelect.innerHTML += `<option value="${index + 1}">${trimestre}</option>`;
+                    });
+                }
+            }
+        }
+
+        async function generarReporte() {
+            const tipo = document.getElementById('reporteTipo').value;
+            const year = parseInt(document.getElementById('reporteYear').value);
+            let periodo = null;
+
+            if (tipo !== 'anual') {
+                periodo = parseInt(document.getElementById('reportePeriodo').value);
+            }
+
+            const facturas = await getAllFacturas();
+            
+            // Filter by period
+            let filteredFacturas = facturas.filter(f => {
+                const fDate = new Date(f.fecha);
+                const fYear = fDate.getFullYear();
+                const fMonth = fDate.getMonth() + 1;
+                const fQuarter = Math.ceil(fMonth / 3);
+
+                if (fYear !== year) return false;
+
+                if (tipo === 'mensual' && fMonth !== periodo) return false;
+                if (tipo === 'trimestral' && fQuarter !== periodo) return false;
+
+                return true;
+            });
+
+            // Calculate totals
+            let ventasBase = 0, ventasIVA = 0, ventasTotal = 0;
+            let comprasBase = 0, comprasIVA = 0, comprasTotal = 0;
+
+            filteredFacturas.forEach(f => {
+                if (f.tipo === 'venta') {
+                    ventasBase += f.base;
+                    ventasIVA += f.iva;
+                    ventasTotal += f.total;
+                } else {
+                    comprasBase += f.base;
+                    comprasIVA += f.iva;
+                    comprasTotal += f.total;
+                }
+            });
+
+            const ivaBalance = ventasIVA - comprasIVA;
+
+            // Update summary display
+            const resumenDiv = document.getElementById('resumenReporte');
+            let titulo = '';
+
+            if (tipo === 'mensual') {
+                const meses = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                              'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                titulo = `${meses[periodo]} de ${year}`;
+            } else if (tipo === 'trimestral') {
+                titulo = `${periodo}º Trimestre de ${year}`;
+            } else {
+                titulo = `Año ${year}`;
+            }
+
+            resumenDiv.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon income">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Ventas (Base)</h3>
+                            <div class="stat-value">${formatCurrency(ventasBase)}</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon income">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 6v6l4 2"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>IVA Ventas</h3>
+                            <div class="stat-value">${formatCurrency(ventasIVA)}</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon expense">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Compras (Base)</h3>
+                            <div class="stat-value">${formatCurrency(comprasBase)}</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon expense">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 6v6l4 2"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>IVA Compras</h3>
+                            <div class="stat-value">${formatCurrency(comprasIVA)}</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="background: var(--background); border-radius: 10px; padding: 25px; text-align: center; margin-top: 20px;">
+                    <h3 style="margin-bottom: 15px; color: var(--text-light);">Liquidación IVA</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: ${ivaBalance >= 0 ? 'var(--accent)' : 'var(--danger)'};">
+                        ${formatCurrency(ivaBalance)}
+                    </div>
+                    <p style="color: var(--text-light); margin-top: 10px;">
+                        ${ivaBalance >= 0 ? 'A favor de la Hacienda Pública' : 'A pagar'}
+                    </p>
+                </div>
+            `;
+
+            // Generate PDF
+            createPDFReport(filteredFacturas, tipo, year, periodo, titulo, {
+                ventasBase, ventasIVA, ventasTotal,
+                comprasBase, comprasIVA, comprasTotal,
+                ivaBalance
+            });
+        }
+
+        function createPDFReport(facturas, tipo, year, periodo, titulo, totales) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            // Header
+            doc.setFillColor(255, 102, 0);
+            doc.rect(0, 0, 220, 35, 'F');
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(24);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Reporte de Facturas', 20, 20);
+
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Período: ${titulo}`, 20, 30);
+
+            // Reset text color
+            doc.setTextColor(0, 0, 0);
+
+            // Summary section
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Resumen Financiero', 20, 50);
+
+            let yPos = 65;
+
+            // Summary table
+            const summaryData = [
+                ['Concepto', 'Base Imponible', 'IVA (21%)', 'Total'],
+                ['Ventas', totales.ventasBase.toFixed(2) + ' €', totales.ventasIVA.toFixed(2) + ' €', totales.ventasTotal.toFixed(2) + ' €'],
+                ['Compras', totales.comprasBase.toFixed(2) + ' €', totales.comprasIVA.toFixed(2) + ' €', totales.comprasTotal.toFixed(2) + ' €'],
+                ['', '', '', ''],
+                ['Liquidación IVA', '', '', totales.ivaBalance.toFixed(2) + ' €']
+            ];
+
+            doc.autoTable({
+                startY: yPos,
+                head: [summaryData[0]],
+                body: summaryData.slice(1),
+                theme: 'striped',
+                headStyles: { fillColor: [255, 102, 0] },
+                columnStyles: {
+                    0: { fontStyle: 'bold' },
+                    3: { fontStyle: 'bold' }
+                }
+            });
+
+            yPos = doc.lastAutoTable.finalY + 20;
+
+            // Detailed table
+            if (facturas.length > 0) {
+                doc.setFontSize(14);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Detalle de Facturas', 20, yPos);
+
+                yPos += 5;
+
+                const tableData = facturas.map(f => [
+                    formatDate(f.fecha),
+                    f.concepto,
+                    f.tipo === 'venta' ? 'Venta' : 'Compra',
+                    f.base.toFixed(2) + ' €',
+                    f.iva.toFixed(2) + ' €',
+                    f.total.toFixed(2) + ' €'
+                ]);
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Fecha', 'Concepto', 'Tipo', 'Base', 'IVA', 'Total']],
+                    body: tableData,
+                    theme: 'striped',
+                    headStyles: { fillColor: [26, 26, 26] },
+                    styles: { fontSize: 9 }
+                });
+            }
+
+            // Footer
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(10);
+                doc.setTextColor(128, 128, 128);
+                doc.text(
+                    `Generado el ${new Date().toLocaleDateString('es-ES')} | Página ${i} de ${pageCount}`,
+                    doc.internal.pageSize.width / 2,
+                    doc.internal.pageSize.height - 10,
+                    { align: 'center' }
+                );
+            }
+
+            // Save
+            const filename = `reporte_${tipo}_${year}${periodo ? '_' + periodo : ''}.pdf`;
+            doc.save(filename);
+            showToast('Reporte PDF generado correctamente', 'success');
+        }
+
+        // Backup Functions
+        async function exportarDatos() {
+            const facturas = await getAllFacturas();
+            const data = {
+                version: 1,
+                exportDate: new Date().toISOString(),
+                facturas: facturas
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `backup_facturas_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+
+            showToast('Backup exportado correctamente', 'success');
+        }
+
+        async function importarDatos(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                if (!data.facturas || !Array.isArray(data.facturas)) {
+                    throw new Error('Formato de archivo no válido');
+                }
+
+                // Clear existing data
+                const transaction = db.transaction(['facturas'], 'readwrite');
+                const store = transaction.objectStore('facturas');
+                await store.clear();
+
+                // Import new data
+                for (const factura of data.facturas) {
+                    await addFactura(factura);
+                }
+
+                showToast(`${data.facturas.length} facturas importadas correctamente`, 'success');
+                loadDashboard();
+            } catch (error) {
+                showToast('Error al importar el archivo', 'error');
+                console.error(error);
+            }
+
+            event.target.value = '';
+        }
+
+        // System Info
+        function updateSystemInfo() {
+            const infoDiv = document.getElementById('systemInfo');
+            if (navigator.storage && navigator.storage.estimate) {
+                navigator.storage.estimate().then(estimate => {
+                    const usage = (estimate.usage / 1024 / 1024).toFixed(2);
+                    const quota = (estimate.quota / 1024 / 1024).toFixed(2);
+                    infoDiv.innerHTML = `
+                        <p><strong>Almacenamiento utilizado:</strong> ${usage} MB de ${quota} MB</p>
+                        <p style="margin-top: 10px;"><strong>Navegador:</strong> ${navigator.userAgent}</p>
+                    `;
+                });
+            } else {
+                infoDiv.innerHTML = `
+                    <p>La información del sistema no está disponible en este navegador.</p>
+                `;
+            }
+        }
+
+        // Toast Notifications
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                    ${type === 'success' ? '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>' : 
+                      type === 'error' ? '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>' :
+                      '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'}
+                </svg>
+                ${message}
+            `;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Initialize App
+        async function initApp() {
+            try {
+                await initDB();
+                console.log('Base de datos inicializada correctamente');
+                loadDashboard();
+                updateSystemInfo();
+
+                // Set default date to today
+                document.getElementById('facturaFecha').valueAsDate = new Date();
+            } catch (error) {
+                console.error('Error al inicializar la aplicación:', error);
+                showToast('Error al inicializar la aplicación', 'error');
+            }
+        }
+
+        // Start app
+        initApp();
+    </script>
+</body>
+</html>

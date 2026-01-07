@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Gestor de Facturas</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f8; overflow: hidden; margin: 0; }
+.app-container { display: flex; height: 100vh; }
+.sidebar { width: 250px; background: #1a1a1a; color: white; padding: 20px 0; flex-shrink: 0; }
+.sidebar-header { padding: 0 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; }
+.logo-container { display: flex; align-items: center; gap: 10px; }
+.logo-img { width: 45px; height: 45px; border-radius: 8px; background: white; padding: 3px; }
+.app-name { font-size: 1.1rem; font-weight: bold; }
+.nav-menu { list-style: none; }
+.nav-item { margin: 3px 10px; }
+.nav-link { display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: rgba(255,255,255,0.7); text-decoration: none; border-radius: 8px; transition: all 0.3s; cursor: pointer; }
+.nav-link:hover, .nav-link.active { background: #ff6600; color: white; }
+.main-content { flex: 1; padding: 25px; overflow-y: auto; min-width: 0; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px; }
+.page-title { font-size: 1.6rem; font-weight: bold; color: #1a1a1a; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+.btn-primary { background: #ff6600; color: white; }
+.btn-success { background: #2ecc71; color: white; }
+.btn-secondary { background: #1a1a1a; color: white; }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 25px; }
+.stat-card { background: white; border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.stat-icon { width: 55px; height: 55px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.stat-icon svg { width: 26px; height: 26px; }
+.stat-icon.income { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.stat-icon.expense { background: rgba(231,76,60,0.15); color: #e74c3c; }
+.stat-icon.vat { background: rgba(255,102,0,0.15); color: #ff6600; }
+.stat-info h3 { font-size: 0.85rem; color: #666; margin-bottom: 5px; }
+.stat-value { font-size: 1.4rem; font-weight: bold; color: #1a1a1a; }
+.card { background: white; border-radius: 12px; padding: 22px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.card-title { font-size: 1.1rem; font-weight: 600; color: #1a1a1a; }
+.data-table { width: 100%; border-collapse: collapse; overflow-x: auto; display: block; }
+.data-table th, .data-table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+.data-table th { background: #f4f6f8; font-weight: 600; color: #1a1a1a; }
+.data-table tr:hover { background: rgba(255,102,0,0.05); }
+.badge { padding: 5px 10px; border-radius: 15px; font-size: 0.75rem; font-weight: 600; }
+.badge-income { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.badge-expense { background: rgba(231,76,60,0.15); color: #e74c3c; }
+.action-btn { width: 34px; height: 34px; border: none; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all 0.3s; margin: 2px; font-size: 14px; font-weight: bold; }
+.action-btn.view { background: rgba(52,152,219,0.15); color: #3498db; }
+.action-btn.delete { background: rgba(231,76,60,0.15); color: #e74c3c; }
+.action-btn:hover { color: white; }
+.section { display: none; }
+.section.active { display: block; }
+.empty-state { text-align: center; padding: 50px 20px; color: #666; }
+.empty-state svg { width: 70px; height: 70px; opacity: 0.4; margin-bottom: 15px; }
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
+.modal-overlay.active { display: flex; }
+.modal { background: white; border-radius: 12px; width: 90%; max-width: 550px; max-height: 90vh; overflow-y: auto; margin: 10px; }
+.modal-header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+.modal-title { font-size: 1.2rem; font-weight: 600; }
+.modal-close { width: 36px; height: 36px; border: none; background: #f4f6f8; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+.modal-close:hover { background: #e74c3c; color: white; }
+.modal-body { padding: 20px; }
+.modal-footer { padding: 18px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; margin-bottom: 6px; font-weight: 500; color: #1a1a1a; }
+.form-input, .form-select { width: 100%; padding: 12px 14px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; }
+.form-input:focus, .form-select:focus { outline: none; border-color: #ff6600; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+.file-upload { border: 2px dashed #e0e0e0; border-radius: 10px; padding: 25px; text-align: center; cursor: pointer; transition: all 0.3s; }
+.file-upload:hover { border-color: #ff6600; background: rgba(255,102,0,0.05); }
+.file-upload input { display: none; }
+.calc-preview { background: #f4f6f8; border-radius: 10px; padding: 18px; margin-top: 12px; }
+.calc-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e0e0e0; }
+.calc-row:last-child { border-bottom: none; font-weight: bold; color: #ff6600; }
+.report-filters { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 22px; }
+.filter-group { display: flex; flex-direction: column; gap: 5px; }
+.filter-group label { font-size: 0.8rem; color: #666; }
+.toast-container { position: fixed; bottom: 25px; right: 25px; z-index: 2000; }
+.toast { background: #1a1a1a; color: white; padding: 14px 22px; border-radius: 10px; margin-top: 10px; display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+.toast.success { border-left: 4px solid #2ecc71; }
+.toast.error { border-left: 4px solid #e74c3c; }
+.quick-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
+.quick-stat { background: #f4f6f8; padding: 18px; border-radius: 10px; text-align: center; }
+.quick-stat-value { font-size: 1.3rem; font-weight: bold; color: #1a1a1a; }
+.quick-stat-label { font-size: 0.8rem; color: #666; margin-top: 5px; }
+.pdf-viewer { width: 100%; height: 500px; border: none; }
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="app-container">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-container">
+                <img src="logo-redes_Transparente-216x216.png" class="logo-img" id="logoImg">
+                <div>
+                    <div class="app-name">Gestor de Facturas</div>
+                </div>
+            </div>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item"><a href="#" class="nav-link active" data-section="dashboard">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Dashboard
+            </a></li>
+            <li class="nav-item"><a href="#" class="nav-link" data-section="compras">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                Facturas Compra
+            </a></li>
+            <li class="nav-item"><a href="#" class="nav-link" data-section="ventas">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                Facturas Venta
+            </a></li>
+            <li class="nav-item"><a href="#" class="nav-link" data-section="reportes">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Reportes
+            </a></li>
+        </ul>
+    </aside>
+    <main class="main-content">
+        <section class="section active" id="dashboard">
+            <div class="page-header">
+                <h1 class="page-title">Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="openModal('compra')">+ Compra</button>
+                    <button class="btn btn-success" onclick="openModal('venta')">+ Venta</button>
+                </div>
+            </div>
+            <div class="quick-stats">
+                <div class="quick-stat"><div class="quick-stat-value" id="totalVentas">0.00 EUR</div><div class="quick-stat-label">Total Ventas</div></div>
+                <div class="quick-stat"><div class="quick-stat-value" id="totalCompras">0.00 EUR</div><div class="quick-stat-label">Total Compras</div></div>
+                <div class="quick-stat"><div class="quick-stat-value" id="ivaTrimestre">0.00 EUR</div><div class="quick-stat-label">IVA Trimestre</div></div>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-icon income"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><div class="stat-info"><h3>Ingresos (Base)</h3><div class="stat-value" id="ingresosBase">0.00 EUR</div></div></div>
+                <div class="stat-card"><div class="stat-icon expense"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg></div><div class="stat-info"><h3>Gastos (Base)</h3><div class="stat-value" id="gastosBase">0.00 EUR</div></div></div>
+                <div class="stat-card"><div class="stat-icon vat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div class="stat-info"><h3>IVA Soportado</h3><div class="stat-value" id="ivaSoportado">0.00 EUR</div></div></div>
+                <div class="stat-card"><div class="stat-icon vat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-info"><h3>IVA Repercutido</h3><div class="stat-value" id="ivaRepercutido">0.00 EUR</div></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h2 class="card-title">Ultimas Facturas</h2><button class="btn btn-outline btn-sm" onclick="showSection('compras')">Ver Todas</button></div>
+                <div style="overflow-x: auto;">
+                <table class="data-table"><thead><tr><th>Fecha</th><th>Concepto</th><th>Tipo</th><th>Base</th><th>IVA</th><th>Total</th><th>Acciones</th></tr></thead><tbody id="ultimasFacturas"></tbody></table>
+                </div>
+                <div class="empty-state" id="emptyDashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><h3>No hay facturas registradas</h3><p>Comienza anyadiendo tu primera factura</p></div>
+            </div>
+        </section>
+        <section class="section" id="compras">
+            <div class="page-header"><h1 class="page-title">Facturas de Compra</h1><button class="btn btn-primary" onclick="openModal('compra')">+ Nueva Factura</button></div>
+            <div class="card">
+                <div style="overflow-x: auto;">
+                <table class="data-table"><thead><tr><th>Fecha</th><th>Proveedor</th><th>Base</th><th>IVA (21%)</th><th>Total</th><th>Acciones</th></tr></thead><tbody id="tablaCompras"></tbody></table>
+                </div>
+                <div class="empty-state" id="emptyCompras"><h3>No hay facturas de compra</h3><p>Anyade tu primera factura de compra</p></div>
+            </div>
+        </section>
+        <section class="section" id="ventas">
+            <div class="page-header"><h1 class="page-title">Facturas Emitidas</h1><button class="btn btn-success" onclick="openModal('venta')">+ Nueva Factura</button></div>
+            <div class="card">
+                <div style="overflow-x: auto;">
+                <table class="data-table"><thead><tr><th>Fecha</th><th>Cliente</th><th>Base</th><th>IVA (21%)</th><th>Total</th><th>Acciones</th></tr></thead><tbody id="tablaVentas"></tbody></table>
+                </div>
+                <div class="empty-state" id="emptyVentas"><h3>No hay facturas emitidas</h3><p>Anyade tu primera factura emitida</p></div>
+            </div>
+        </section>
+        <section class="section" id="reportes">
+            <div class="page-header"><h1 class="page-title">Reportes</h1></div>
+            <div class="card">
+                <h2 class="card-title" style="margin-bottom: 18px;">Generar Reporte</h2>
+                <div class="report-filters">
+                    <div class="filter-group"><label>Tipo</label><select class="form-select" id="reporteTipo" onchange="updateReporteOptions()"><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option></select></div>
+                    <div class="filter-group"><label>Año</label><select class="form-select" id="reporteYear"></select></div>
+                    <div class="filter-group" id="periodoGroup"><label>Periodo</label><select class="form-select" id="reportePeriodo"></select></div>
+                    <div class="filter-group" style="align-self: flex-end;"><button class="btn btn-primary" onclick="generarReporte()">Generar PDF</button></div>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 18px;">
+                <h2 class="card-title" style="margin-bottom: 18px;">Resumen del Periodo</h2>
+                <div id="resumenReporte"><div class="empty-state"><p>Selecciona las opciones y genera tu reporte</p></div></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<div class="modal-overlay" id="facturaModal">
+    <div class="modal">
+        <div class="modal-header"><h3 class="modal-title" id="modalTitle">Nueva Factura</h3><button class="modal-close" onclick="closeModal()">X</button></div>
+        <div class="modal-body">
+            <form id="facturaForm">
+                <input type="hidden" id="facturaId"><input type="hidden" id="facturaTipo">
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Fecha</label><input type="date" class="form-input" id="facturaFecha" required></div>
+                    <div class="form-group"><label class="form-label" id="proveedorLabel">Proveedor</label><input type="text" class="form-input" id="facturaConcepto" placeholder="Nombre" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Base Imponible (EUR)</label><input type="number" class="form-input" id="facturaBase" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('base')"></div>
+                    <div class="form-group"><label class="form-label">IVA (21%) (EUR)</label><input type="number" class="form-input" id="facturaIVA" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('iva')"></div>
+                    <div class="form-group"><label class="form-label">Total (EUR)</label><input type="number" class="form-input" id="facturaTotal" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('total')"></div>
+                </div>
+                <div class="calc-preview" id="calcPreview" style="display:none">
+                    <div class="calc-row"><span>Base Imponible</span><span id="previewBase">0.00 EUR</span></div>
+                    <div class="calc-row"><span>IVA (21%)</span><span id="previewIVA">0.00 EUR</span></div>
+                    <div class="calc-row"><span>Total</span><span id="previewTotal">0.00 EUR</span></div>
+                </div>
+                <div class="form-group"><label class="form-label">Archivo PDF</label><div class="file-upload" onclick="document.getElementById('pdfFile').click()"><p>Haz clic para subir PDF</p><input type="file" id="pdfFile" accept="application/pdf" onchange="handleFileSelect(event)"><span id="fileName"></span></div></div>
+            </form>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarFactura()">Guardar</button></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="pdfModal">
+    <div class="modal" style="max-width: 850px;">
+        <div class="modal-header"><h3 class="modal-title">Visualizar Factura</h3><button class="modal-close" onclick="closePdfModal()">X</button></div>
+        <div class="modal-body"><iframe id="pdfViewer" class="pdf-viewer" style="width:100%;height:480px;border:none;display:none"></iframe><div id="noPdfState">No hay PDF asociado</div></div>
+        <div class="modal-footer"><button class="btn btn-secondary" onclick="closePdfModal()">Cerrar</button><button class="btn btn-primary" id="downloadPdfBtn" onclick="descargarPdf()" style="display:none">Descargar</button></div>
+    </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// IndexedDB - Base de datos local
+var db;
+var DB_NAME = 'GestorFacturasDB';
+var DB_VERSION = 1;
+
+function initDB() {
+    return new Promise(function(resolve, reject) {
+        var request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onerror = function() { reject(request.error); };
+        request.onsuccess = function() { db = request.result; resolve(db); };
+        request.onupgradeneeded = function(event) {
+            var database = event.target.result;
+            if (!database.objectStoreNames.contains('facturas')) {
+                var store = database.createObjectStore('facturas', { keyPath: 'id' });
+                store.createIndex('fecha', 'fecha', { unique: false });
+                store.createIndex('tipo', 'tipo', { unique: false });
+            }
+        };
+    });
+}
+
+function addFactura(factura) {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readwrite');
+        var store = transaction.objectStore('facturas');
+        var request = store.add(factura);
+        request.onsuccess = function() { resolve(request.result); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function updateFactura(factura) {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readwrite');
+        var store = transaction.objectStore('facturas');
+        var request = store.put(factura);
+        request.onsuccess = function() { resolve(request.result); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function deleteFactura(id) {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readwrite');
+        var store = transaction.objectStore('facturas');
+        var request = store.delete(id);
+        request.onsuccess = function() { resolve(); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function getFactura(id) {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readonly');
+        var store = transaction.objectStore('facturas');
+        var request = store.get(id);
+        request.onsuccess = function() { resolve(request.result); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function getAllFacturas() {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readonly');
+        var store = transaction.objectStore('facturas');
+        var request = store.getAll();
+        request.onsuccess = function() { resolve(request.result); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function getFacturasByType(tipo) {
+    return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(['facturas'], 'readonly');
+        var store = transaction.objectStore('facturas');
+        var index = store.index('tipo');
+        var request = index.getAll(tipo);
+        request.onsuccess = function() { resolve(request.result); };
+        request.onerror = function() { reject(request.error); };
+    });
+}
+
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
+}
+
+function formatDate(dateString) {
+    var date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function getQuarter(date) {
+    var month = new Date(date).getMonth() + 1;
+    return Math.ceil(month / 3);
+}
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+// Navigation
+document.querySelectorAll('.nav-link').forEach(function(link) {
+    link.addEventListener('click', function(e) {
+        e.preventDefault();
+        var section = link.dataset.section;
+        showSection(section);
+    });
+});
+
+function showSection(sectionId) {
+    document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+    document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
+    document.getElementById(sectionId).classList.add('active');
+    document.querySelector('[data-section="' + sectionId + '"]').classList.add('active');
+    if (sectionId === 'dashboard') loadDashboard();
+    if (sectionId === 'compras') loadCompras();
+    if (sectionId === 'ventas') loadVentas();
+    if (sectionId === 'reportes') initReportes();
+}
+
+// Modal
+function openModal(tipo, facturaId) {
+    var modal = document.getElementById('facturaModal');
+    document.getElementById('modalTitle').textContent = tipo === 'compra' ? 'Nueva Factura de Compra' : 'Nueva Factura Emitida';
+    document.getElementById('proveedorLabel').textContent = tipo === 'compra' ? 'Proveedor' : 'Cliente';
+    document.getElementById('facturaTipo').value = tipo;
+    document.getElementById('facturaId').value = '';
+    document.getElementById('facturaForm').reset();
+    document.getElementById('fileName').textContent = '';
+    document.getElementById('calcPreview').style.display = 'none';
+    document.getElementById('pdfFile').value = '';
+    selectedPdfBase64 = null;
+    document.getElementById('facturaFecha').valueAsDate = new Date();
+    modal.classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('facturaModal').classList.remove('active');
+}
+
+function closePdfModal() {
+    document.getElementById('pdfModal').classList.remove('active');
+    document.getElementById('pdfViewer').src = '';
+}
+
+// File Handling
+var selectedPdfBase64 = null;
+function handleFileSelect(event) {
+    var file = event.target.files[0];
+    if (file && file.type === 'application/pdf') {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            selectedPdfBase64 = e.target.result;
+            document.getElementById('fileName').textContent = file.name;
+        };
+        reader.readAsDataURL(file);
+    } else {
+        showToast('Selecciona un PDF valido', 'error');
+    }
+}
+
+// Calculations
+function calcularTotales(source) {
+    var base = parseFloat(document.getElementById('facturaBase').value) || 0;
+    var iva = parseFloat(document.getElementById('facturaIVA').value) || 0;
+    var total = parseFloat(document.getElementById('facturaTotal').value) || 0;
+    
+    if (source === 'base') {
+        iva = base * 0.21;
+        total = base + iva;
+        document.getElementById('facturaIVA').value = iva.toFixed(2);
+        document.getElementById('facturaTotal').value = total.toFixed(2);
+    } else if (source === 'iva') {
+        base = iva / 0.21;
+        total = base + iva;
+        document.getElementById('facturaBase').value = base.toFixed(2);
+        document.getElementById('facturaTotal').value = total.toFixed(2);
+    } else if (source === 'total') {
+        base = total / 1.21;
+        iva = total - base;
+        document.getElementById('facturaBase').value = base.toFixed(2);
+        document.getElementById('facturaIVA').value = iva.toFixed(2);
+    }
+    
+    document.getElementById('previewBase').textContent = formatCurrency(base);
+    document.getElementById('previewIVA').textContent = formatCurrency(iva);
+    document.getElementById('previewTotal').textContent = formatCurrency(total);
+    document.getElementById('calcPreview').style.display = 'block';
+}
+
+// Save Invoice
+function guardarFactura() {
+    var tipo = document.getElementById('facturaTipo').value;
+    var id = document.getElementById('facturaId').value || generateId();
+    var fecha = document.getElementById('facturaFecha').value;
+    var concepto = document.getElementById('facturaConcepto').value;
+    var base = parseFloat(document.getElementById('facturaBase').value) || 0;
+    var iva = parseFloat(document.getElementById('facturaIVA').value) || 0;
+    var total = parseFloat(document.getElementById('facturaTotal').value) || 0;
+    
+    if (!fecha || !concepto) {
+        showToast('Completa todos los campos', 'error');
+        return;
+    }
+    
+    var factura = {
+        id: id,
+        tipo: tipo,
+        fecha: fecha,
+        concepto: concepto,
+        base: base,
+        iva: iva,
+        total: total,
+        pdf: selectedPdfBase64,
+        createdAt: new Date().toISOString()
+    };
+    
+    var promise = document.getElementById('facturaId').value ? updateFactura(factura) : addFactura(factura);
+    
+    promise.then(function() {
+        showToast(document.getElementById('facturaId').value ? 'Factura actualizada' : 'Factura guardada', 'success');
+        closeModal();
+        loadDashboard();
+        selectedPdfBase64 = null;
+    }).catch(function() {
+        showToast('Error al guardar', 'error');
+    });
+}
+
+// Load Dashboard
+function loadDashboard() {
+    getAllFacturas().then(function(facturas) {
+        var totalVentasBase = 0, totalVentasIVA = 0, totalComprasBase = 0, totalComprasIVA = 0;
+        
+        facturas.forEach(function(f) {
+            if (f.tipo === 'venta') {
+                totalVentasBase += f.base;
+                totalVentasIVA += f.iva;
+            } else {
+                totalComprasBase += f.base;
+                totalComprasIVA += f.iva;
+            }
+        });
+        
+        var ivaTrimestre = totalVentasIVA - totalComprasIVA;
+        
+        document.getElementById('totalVentas').textContent = formatCurrency(totalVentasBase + totalVentasIVA);
+        document.getElementById('totalCompras').textContent = formatCurrency(totalComprasBase + totalComprasIVA);
+        document.getElementById('ivaTrimestre').textContent = formatCurrency(ivaTrimestre);
+        document.getElementById('ivaTrimestre').style.color = ivaTrimestre >= 0 ? '#2ecc71' : '#e74c3c';
+        
+        document.getElementById('ingresosBase').textContent = formatCurrency(totalVentasBase);
+        document.getElementById('gastosBase').textContent = formatCurrency(totalComprasBase);
+        document.getElementById('ivaSoportado').textContent = formatCurrency(totalComprasIVA);
+        document.getElementById('ivaRepercutido').textContent = formatCurrency(totalVentasIVA);
+        
+        var tbody = document.getElementById('ultimasFacturas');
+        var emptyState = document.getElementById('emptyDashboard');
+        
+        if (facturas.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.style.display = 'block';
+        } else {
+            emptyState.style.display = 'none';
+            var sortedFacturas = facturas.slice().sort(function(a, b) {
+                return new Date(b.fecha) - new Date(a.fecha);
+            }).slice(0, 5);
+            
+            tbody.innerHTML = sortedFacturas.map(function(f) {
+                var acciones = '';
+                if (f.pdf) {
+                    acciones = '<button class="action-btn view" onclick="verPdf(\'' + f.id + '\')">V</button>';
+                }
+                acciones += '<button class="action-btn delete" onclick="eliminarFactura(\'' + f.id + '\')">X</button>';
+                
+                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td><span class="badge ' + (f.tipo === 'venta' ? 'badge-income' : 'badge-expense') + '">' + (f.tipo === 'venta' ? 'Venta' : 'Compra') + '</span></td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong></td><td>' + acciones + '</td></tr>';
+            }).join('');
+        }
+    });
+}
+
+// Load Compras
+function loadCompras() {
+    getFacturasByType('compra').then(function(facturas) {
+        var tbody = document.getElementById('tablaCompras');
+        var emptyState = document.getElementById('emptyCompras');
+        
+        if (facturas.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.style.display = 'block';
+        } else {
+            emptyState.style.display = 'none';
+            var sortedFacturas = facturas.slice().sort(function(a, b) {
+                return new Date(b.fecha) - new Date(a.fecha);
+            });
+            
+            tbody.innerHTML = sortedFacturas.map(function(f) {
+                var acciones = '';
+                if (f.pdf) {
+                    acciones = '<button class="action-btn view" onclick="verPdf(\'' + f.id + '\')">V</button>';
+                }
+                acciones += '<button class="action-btn delete" onclick="eliminarFactura(\'' + f.id + '\')">X</button>';
+                
+                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong></td><td>' + acciones + '</td></tr>';
+            }).join('');
+        }
+    });
+}
+
+// Load Ventas
+function loadVentas() {
+    getFacturasByType('venta').then(function(facturas) {
+        var tbody = document.getElementById('tablaVentas');
+        var emptyState = document.getElementById('emptyVentas');
+        
+        if (facturas.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.style.display = 'block';
+        } else {
+            emptyState.style.display = 'none';
+            var sortedFacturas = facturas.slice().sort(function(a, b) {
+                return new Date(b.fecha) - new Date(a.fecha);
+            });
+            
+            tbody.innerHTML = sortedFacturas.map(function(f) {
+                var acciones = '';
+                if (f.pdf) {
+                    acciones = '<button class="action-btn view" onclick="verPdf(\'' + f.id + '\')">V</button>';
+                }
+                acciones += '<button class="action-btn delete" onclick="eliminarFactura(\'' + f.id + '\')">X</button>';
+                
+                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong></td><td>' + acciones + '</td></tr>';
+            }).join('');
+        }
+    });
+}
+
+// PDF Functions
+function verPdf(id) {
+    getFactura(id).then(function(factura) {
+        if (!factura || !factura.pdf) {
+            showToast('No hay PDF asociado', 'info');
+            return;
+        }
+        document.getElementById('pdfViewer').src = factura.pdf;
+        document.getElementById('pdfViewer').style.display = 'block';
+        document.getElementById('noPdfState').style.display = 'none';
+        document.getElementById('downloadPdfBtn').style.display = 'inline-flex';
+        document.getElementById('pdfModal').classList.add('active');
+    });
+}
+
+function descargarPdf() {
+    var viewer = document.getElementById('pdfViewer');
+    if (viewer.src) {
+        var link = document.createElement('a');
+        link.href = viewer.src;
+        link.download = 'factura.pdf';
+        link.click();
+    }
+}
+
+// Delete
+function eliminarFactura(id) {
+    if (confirm('Eliminar esta factura?')) {
+        deleteFactura(id).then(function() {
+            showToast('Factura eliminada', 'success');
+            loadDashboard();
+        });
+    }
+}
+
+// Report Functions
+function initReportes() {
+    var currentYear = new Date().getFullYear();
+    var yearSelect = document.getElementById('reporteYear');
+    yearSelect.innerHTML = '';
+    for (var i = currentYear; i >= currentYear - 5; i--) {
+        yearSelect.innerHTML += '<option value="' + i + '">' + i + '</option>';
+    }
+    updateReporteOptions();
+}
+
+function updateReporteOptions() {
+    var tipo = document.getElementById('reporteTipo').value;
+    var periodoSelect = document.getElementById('reportePeriodo');
+    var periodoGroup = document.getElementById('periodoGroup');
+    
+    if (tipo === 'anual') {
+        periodoGroup.style.display = 'none';
+    } else {
+        periodoGroup.style.display = 'block';
+        periodoSelect.innerHTML = '';
+        
+        if (tipo === 'mensual') {
+            var meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            meses.forEach(function(mes, i) {
+                periodoSelect.innerHTML += '<option value="' + (i + 1) + '">' + mes + '</option>';
+            });
+        } else if (tipo === 'trimestral') {
+            var trimestres = ['Trimestre 1 (Ene-Mar)', 'Trimestre 2 (Abr-Jun)', 'Trimestre 3 (Jul-Sep)', 'Trimestre 4 (Oct-Dic)'];
+            trimestres.forEach(function(t, i) {
+                periodoSelect.innerHTML += '<option value="' + (i + 1) + '">' + t + '</option>';
+            });
+        }
+    }
+}
+
+function generarReporte() {
+    var tipo = document.getElementById('reporteTipo').value;
+    var year = parseInt(document.getElementById('reporteYear').value);
+    var periodo = null;
+    if (tipo !== 'anual') {
+        periodo = parseInt(document.getElementById('reportePeriodo').value);
+    }
+    
+    getAllFacturas().then(function(facturas) {
+        var filteredFacturas = facturas.filter(function(f) {
+            var fDate = new Date(f.fecha);
+            var fYear = fDate.getFullYear();
+            var fMonth = fDate.getMonth() + 1;
+            var fQuarter = Math.ceil(fMonth / 3);
+            
+            if (fYear !== year) return false;
+            if (tipo === 'mensual' && fMonth !== periodo) return false;
+            if (tipo === 'trimestral' && fQuarter !== periodo) return false;
+            
+            return true;
+        });
+        
+        var ventasBase = 0, ventasIVA = 0, ventasTotal = 0;
+        var comprasBase = 0, comprasIVA = 0, comprasTotal = 0;
+        
+        filteredFacturas.forEach(function(f) {
+            if (f.tipo === 'venta') {
+                ventasBase += f.base;
+                ventasIVA += f.iva;
+                ventasTotal += f.total;
+            } else {
+                comprasBase += f.base;
+                comprasIVA += f.iva;
+                comprasTotal += f.total;
+            }
+        });
+        
+        var ivaBalance = ventasIVA - comprasIVA;
+        
+        var titulo = '';
+        if (tipo === 'mensual') {
+            var meses = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            titulo = meses[periodo] + ' de ' + year;
+        } else if (tipo === 'trimestral') {
+            titulo = periodo + ' Trimestre de ' + year;
+        } else {
+            titulo = 'Ano ' + year;
+        }
+        
+        var resumenDiv = document.getElementById('resumenReporte');
+        resumenDiv.innerHTML = '<div class="stats-grid">' +
+            '<div class="stat-card"><div class="stat-icon income"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><div class="stat-info"><h3>Ventas (Base)</h3><div class="stat-value">' + formatCurrency(ventasBase) + '</div></div></div>' +
+            '<div class="stat-card"><div class="stat-icon income"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg></div><div class="stat-info"><h3>IVA Ventas</h3><div class="stat-value">' + formatCurrency(ventasIVA) + '</div></div></div>' +
+            '<div class="stat-card"><div class="stat-icon expense"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg></div><div class="stat-info"><h3>Compras (Base)</h3><div class="stat-value">' + formatCurrency(comprasBase) + '</div></div></div>' +
+            '<div class="stat-card"><div class="stat-icon expense"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg></div><div class="stat-info"><h3>IVA Compras</h3><div class="stat-value">' + formatCurrency(comprasIVA) + '</div></div></div>' +
+            '</div><div style="background:#f4f6f8;border-radius:10px;padding:22px;text-align:center;margin-top:18px;"><h3 style="margin-bottom:12px;color:#666;">Liquidacion IVA</h3><div style="font-size:1.8rem;font-weight:bold;color:' + (ivaBalance >= 0 ? '#2ecc71' : '#e74c3c') + ';">' + formatCurrency(ivaBalance) + '</div><p style="color:#666;margin-top:8px;">' + (ivaBalance >= 0 ? 'A favor de Hacienda' : 'A pagar') + '</p></div>';
+        
+        showToast('Reporte generado correctamente', 'success');
+    });
+}
+
+// Toast
+function showToast(message, type) {
+    type = type || 'info';
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.innerHTML = message;
+    container.appendChild(toast);
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 3000);
+}
+
+// Init
+initDB().then(function() {
+    loadDashboard();
+}).catch(function() {
+    showToast('Error al inicializar', 'error');
+});
+</script>
+</body>
+</html>

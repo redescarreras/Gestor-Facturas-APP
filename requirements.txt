@@ -1,0 +1,11 @@
+# Dependencias Python para servidor local
+# Requiere Python 3.7 o superior
+
+# Servidor web simple
+flask>=2.0.0
+
+# Para crear ejecutables (opcional)
+pyinstaller>=5.0.0
+
+# Compatibilidad con versiones antiguas de Python
+Werkzeug>=2.0.0
