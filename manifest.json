@@ -2,13 +2,15 @@
   "name": "Gestor de Facturas",
   "short_name": "Facturas",
   "description": "Aplicación de gestión de facturas con cálculo automático de IVA",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#f4f6f8",
   "theme_color": "#ff6600",
   "icons": [
     {
-      "src": "logo-redes_Transparente-216x216.png",
+      "src": "./logo-redes_Transparente-216x216.png",
       "sizes": "216x216",
       "type": "image/png",
       "purpose": "any maskable"

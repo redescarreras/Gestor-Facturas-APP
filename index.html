@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#ff6600">
     <meta name="description" content="Aplicación de gestión de facturas con cálculo automático de IVA">
     <title>Gestor de Facturas - Control Financiero</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="logo-redes_Transparente-216x216.png">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./logo-redes_Transparente-216x216.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
@@ -2219,7 +2219,7 @@
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                navigator.serviceWorker.register('./sw.js').then(function(registration) {
                     console.log('ServiceWorker registrado correctamente');
                 }, function(err) {
                     console.log('Error al registrar ServiceWorker: ', err);
