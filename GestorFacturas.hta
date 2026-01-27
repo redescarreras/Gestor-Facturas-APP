@@ -196,9 +196,16 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f8; overflow
                     <div class="form-group"><label class="form-label">IVA (21%) (EUR)</label><input type="number" class="form-input" id="facturaIVA" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('iva')"></div>
                     <div class="form-group"><label class="form-label">Total (EUR)</label><input type="number" class="form-input" id="facturaTotal" step="0.01" min="0" placeholder="0.00" oninput="calcularTotales('total')"></div>
                 </div>
+                <div class="form-group" id="retencionGroup" style="display:none;">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="facturaRetencion" style="width:18px;height:18px;" onchange="calcularTotales('base')">
+                        <span class="form-label" style="margin:0;">Aplicar retención 5%</span>
+                    </label>
+                </div>
                 <div class="calc-preview" id="calcPreview" style="display:none">
                     <div class="calc-row"><span>Base Imponible</span><span id="previewBase">0.00 EUR</span></div>
                     <div class="calc-row"><span>IVA (21%)</span><span id="previewIVA">0.00 EUR</span></div>
+                    <div class="calc-row" id="previewRetencionRow" style="display:none;"><span>Retención 5%</span><span id="previewRetencion">0.00 EUR</span></div>
                     <div class="calc-row"><span>Total</span><span id="previewTotal">0.00 EUR</span></div>
                 </div>
                 <div class="form-group"><label class="form-label">Archivo PDF</label><div class="file-upload" onclick="document.getElementById('pdfFile').click()"><p>Haz clic para subir PDF</p><input type="file" id="pdfFile" accept="application/pdf" onchange="handleFileSelect(event)"><span id="fileName"></span></div></div>
@@ -352,6 +359,10 @@ function openModal(tipo, facturaId) {
     document.getElementById('pdfFile').value = '';
     selectedPdfBase64 = null;
     document.getElementById('facturaFecha').valueAsDate = new Date();
+    // Mostrar checkbox de retención solo para facturas emitidas (venta)
+    document.getElementById('retencionGroup').style.display = tipo === 'venta' ? 'block' : 'none';
+    document.getElementById('facturaRetencion').checked = false;
+    document.getElementById('previewRetencionRow').style.display = 'none';
     modal.classList.add('active');
 }
 
@@ -385,20 +396,35 @@ function calcularTotales(source) {
     var base = parseFloat(document.getElementById('facturaBase').value) || 0;
     var iva = parseFloat(document.getElementById('facturaIVA').value) || 0;
     var total = parseFloat(document.getElementById('facturaTotal').value) || 0;
+    var retencion = 0;
+    var tieneRetencion = document.getElementById('facturaRetencion').checked;
     
     if (source === 'base') {
         iva = base * 0.21;
-        total = base + iva;
+        if (tieneRetencion) {
+            retencion = base * 0.05;
+            total = base + iva - retencion;
+        } else {
+            total = base + iva;
+        }
         document.getElementById('facturaIVA').value = iva.toFixed(2);
         document.getElementById('facturaTotal').value = total.toFixed(2);
     } else if (source === 'iva') {
         base = iva / 0.21;
-        total = base + iva;
+        if (tieneRetencion) {
+            retencion = base * 0.05;
+            total = base + iva - retencion;
+        } else {
+            total = base + iva;
+        }
         document.getElementById('facturaBase').value = base.toFixed(2);
         document.getElementById('facturaTotal').value = total.toFixed(2);
     } else if (source === 'total') {
         base = total / 1.21;
         iva = total - base;
+        if (tieneRetencion) {
+            retencion = base * 0.05;
+        }
         document.getElementById('facturaBase').value = base.toFixed(2);
         document.getElementById('facturaIVA').value = iva.toFixed(2);
     }
@@ -406,6 +432,16 @@ function calcularTotales(source) {
     document.getElementById('previewBase').textContent = formatCurrency(base);
     document.getElementById('previewIVA').textContent = formatCurrency(iva);
     document.getElementById('previewTotal').textContent = formatCurrency(total);
+    
+    // Mostrar/ocultar fila de retención
+    var retencionRow = document.getElementById('previewRetencionRow');
+    if (tieneRetencion) {
+        retencionRow.style.display = 'flex';
+        document.getElementById('previewRetencion').textContent = '-' + formatCurrency(retencion);
+    } else {
+        retencionRow.style.display = 'none';
+    }
+    
     document.getElementById('calcPreview').style.display = 'block';
 }
 
@@ -418,6 +454,12 @@ function guardarFactura() {
     var base = parseFloat(document.getElementById('facturaBase').value) || 0;
     var iva = parseFloat(document.getElementById('facturaIVA').value) || 0;
     var total = parseFloat(document.getElementById('facturaTotal').value) || 0;
+    var retencion = 0;
+    var tieneRetencion = document.getElementById('facturaRetencion').checked;
+    
+    if (tieneRetencion) {
+        retencion = base * 0.05;
+    }
     
     if (!fecha || !concepto) {
         showToast('Completa todos los campos', 'error');
@@ -431,6 +473,7 @@ function guardarFactura() {
         concepto: concepto,
         base: base,
         iva: iva,
+        retencion: retencion,
         total: total,
         pdf: selectedPdfBase64,
         createdAt: new Date().toISOString()
@@ -494,7 +537,9 @@ function loadDashboard() {
                 }
                 acciones += '<button class="action-btn delete" onclick="eliminarFactura(\'' + f.id + '\')">X</button>';
                 
-                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td><span class="badge ' + (f.tipo === 'venta' ? 'badge-income' : 'badge-expense') + '">' + (f.tipo === 'venta' ? 'Venta' : 'Compra') + '</span></td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong></td><td>' + acciones + '</td></tr>';
+                var retencionText = f.retencion && f.retencion > 0 ? '<br><small style="color:#e74c3c;">-Ret: ' + formatCurrency(f.retencion) + '</small>' : '';
+                
+                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td><span class="badge ' + (f.tipo === 'venta' ? 'badge-income' : 'badge-expense') + '">' + (f.tipo === 'venta' ? 'Venta' : 'Compra') + '</span></td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong>' + retencionText + '</td><td>' + acciones + '</td></tr>';
             }).join('');
         }
     });
@@ -550,7 +595,9 @@ function loadVentas() {
                 }
                 acciones += '<button class="action-btn delete" onclick="eliminarFactura(\'' + f.id + '\')">X</button>';
                 
-                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong></td><td>' + acciones + '</td></tr>';
+                var retencionText = f.retencion && f.retencion > 0 ? '<br><small style="color:#e74c3c;">-Ret: ' + formatCurrency(f.retencion) + '</small>' : '';
+                
+                return '<tr><td>' + formatDate(f.fecha) + '</td><td>' + f.concepto + '</td><td>' + formatCurrency(f.base) + '</td><td>' + formatCurrency(f.iva) + '</td><td><strong>' + formatCurrency(f.total) + '</strong>' + retencionText + '</td><td>' + acciones + '</td></tr>';
             }).join('');
         }
     });
