@@ -1956,17 +1956,19 @@
             });
 
             // Calculate totals
-            let ventasBase = 0, ventasIVA = 0, ventasTotal = 0;
-            let comprasBase = 0, comprasIVA = 0, comprasTotal = 0;
+            let ventasBase = 0, ventasIVA = 0, ventasRetencion = 0, ventasTotal = 0;
+            let comprasBase = 0, comprasIVA = 0, comprasRetencion = 0, comprasTotal = 0;
 
             filteredFacturas.forEach(f => {
                 if (f.tipo === 'venta') {
                     ventasBase += f.base;
                     ventasIVA += f.iva;
+                    ventasRetencion += f.retencion || 0;
                     ventasTotal += f.total;
                 } else {
                     comprasBase += f.base;
                     comprasIVA += f.iva;
+                    comprasRetencion += f.retencion || 0;
                     comprasTotal += f.total;
                 }
             });
@@ -2049,8 +2051,8 @@
 
             // Generate PDF
             createPDFReport(filteredFacturas, tipo, year, periodo, titulo, {
-                ventasBase, ventasIVA, ventasTotal,
-                comprasBase, comprasIVA, comprasTotal,
+                ventasBase, ventasIVA, ventasRetencion, ventasTotal,
+                comprasBase, comprasIVA, comprasRetencion, comprasTotal,
                 ivaBalance
             });
         }
@@ -2082,13 +2084,17 @@
 
             let yPos = 65;
 
-            // Summary table
+            // Calcular totales sin retención (Base + IVA)
+            const ventasTotalSinRetencion = totales.ventasBase + totales.ventasIVA;
+            const comprasTotalSinRetencion = totales.comprasBase + totales.comprasIVA;
+
+            // Summary table con dos columnas de total
             const summaryData = [
-                ['Concepto', 'Base Imponible', 'IVA (21%)', 'Total'],
-                ['Ventas', totales.ventasBase.toFixed(2) + ' €', totales.ventasIVA.toFixed(2) + ' €', totales.ventasTotal.toFixed(2) + ' €'],
-                ['Compras', totales.comprasBase.toFixed(2) + ' €', totales.comprasIVA.toFixed(2) + ' €', totales.comprasTotal.toFixed(2) + ' €'],
-                ['', '', '', ''],
-                ['Liquidación IVA', '', '', totales.ivaBalance.toFixed(2) + ' €']
+                ['Concepto', 'Base Imponible', 'IVA (21%)', 'Retención 5%', 'Total c/Retención', 'Total s/Retención'],
+                ['Ventas', totales.ventasBase.toFixed(2) + ' €', totales.ventasIVA.toFixed(2) + ' €', '-' + (totales.ventasRetencion > 0 ? totales.ventasRetencion.toFixed(2) + ' €' : '0.00 €'), totales.ventasTotal.toFixed(2) + ' €', ventasTotalSinRetencion.toFixed(2) + ' €'],
+                ['Compras', totales.comprasBase.toFixed(2) + ' €', totales.comprasIVA.toFixed(2) + ' €', '-' + (totales.comprasRetencion > 0 ? totales.comprasRetencion.toFixed(2) + ' €' : '0.00 €'), totales.comprasTotal.toFixed(2) + ' €', comprasTotalSinRetencion.toFixed(2) + ' €'],
+                ['', '', '', '', '', ''],
+                ['Liquidación IVA', '', '', '', '', totales.ivaBalance.toFixed(2) + ' €']
             ];
 
             doc.autoTable({
@@ -2099,35 +2105,77 @@
                 headStyles: { fillColor: [255, 102, 0] },
                 columnStyles: {
                     0: { fontStyle: 'bold' },
-                    3: { fontStyle: 'bold' }
+                    4: { fontStyle: 'bold' },
+                    5: { fontStyle: 'bold' }
                 }
             });
 
-            yPos = doc.lastAutoTable.finalY + 20;
+            yPos = doc.lastAutoTable.finalY + 15;
 
-            // Detailed table
-            if (facturas.length > 0) {
+            // Separar facturas por tipo
+            const facturasVentas = facturas.filter(f => f.tipo === 'venta');
+            const facturasCompras = facturas.filter(f => f.tipo === 'compra');
+
+            // Tabla de Ventas
+            if (facturasVentas.length > 0) {
                 doc.setFontSize(14);
                 doc.setFont('helvetica', 'bold');
-                doc.text('Detalle de Facturas', 20, yPos);
+                doc.text('Detalle de Ventas', 20, yPos);
 
                 yPos += 5;
 
-                const tableData = facturas.map(f => [
+                const tableDataVentas = facturasVentas.map(f => [
                     formatDate(f.fecha),
                     f.concepto,
-                    f.tipo === 'venta' ? 'Venta' : 'Compra',
                     f.base.toFixed(2) + ' €',
                     f.iva.toFixed(2) + ' €',
-                    f.total.toFixed(2) + ' €'
+                    (f.retencion > 0 ? '-' + f.retencion.toFixed(2) + ' €' : '-'),
+                    f.total.toFixed(2) + ' €',
+                    (f.base + f.iva).toFixed(2) + ' €'
                 ]);
 
                 doc.autoTable({
                     startY: yPos,
-                    head: [['Fecha', 'Concepto', 'Tipo', 'Base', 'IVA', 'Total']],
-                    body: tableData,
+                    head: [['Fecha', 'Concepto', 'Base', 'IVA', 'Retención 5%', 'Total c/Ret', 'Total s/Ret']],
+                    body: tableDataVentas,
                     theme: 'striped',
-                    headStyles: { fillColor: [26, 26, 26] },
+                    headStyles: { fillColor: [46, 204, 113] },
+                    styles: { fontSize: 9 }
+                });
+
+                yPos = doc.lastAutoTable.finalY + 10;
+            }
+
+            // Tabla de Compras
+            if (facturasCompras.length > 0) {
+                // Verificar si necesita nueva página
+                if (yPos > 200) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+
+                doc.setFontSize(14);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Detalle de Compras', 20, yPos);
+
+                yPos += 5;
+
+                const tableDataCompras = facturasCompras.map(f => [
+                    formatDate(f.fecha),
+                    f.concepto,
+                    f.base.toFixed(2) + ' €',
+                    f.iva.toFixed(2) + ' €',
+                    (f.retencion > 0 ? '-' + f.retencion.toFixed(2) + ' €' : '-'),
+                    f.total.toFixed(2) + ' €',
+                    (f.base + f.iva).toFixed(2) + ' €'
+                ]);
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Fecha', 'Concepto', 'Base', 'IVA', 'Retención 5%', 'Total c/Ret', 'Total s/Ret']],
+                    body: tableDataCompras,
+                    theme: 'striped',
+                    headStyles: { fillColor: [231, 76, 60] },
                     styles: { fontSize: 9 }
                 });
             }
