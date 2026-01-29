@@ -1,145 +1,137 @@
 import React, { useState, useEffect } from 'react';
 import { realtimeDb } from './firebase'; 
 import { ref, push, onValue, remove, serverTimestamp } from "firebase/database";
-import { HardHat, ClipboardList, PlusCircle, Trash2, Lock } from 'lucide-react'; // Usando lucide-react del package.json
+import { Lock, HardHat, PlusCircle, List, BarChart, Settings } from 'lucide-react'; // Usando dependencias de tu package.json
 
 function App() {
   const [pin, setPin] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [obra, setObra] = useState("");
-  const [listaObras, setListaObras] = useState([]);
-  const [error, setError] = useState(false);
+  const [nuevaObra, setNuevaObra] = useState("");
+  const [obras, setObras] = useState([]);
+  const [errorPin, setErrorPin] = useState(false);
 
   const PIN_CORRECTO = "1482"; 
 
   useEffect(() => {
     if (isAuthenticated) {
       const obrasRef = ref(realtimeDb, 'obras');
-      return onValue(obrasRef, (snapshot) => {
+      const unsubscribe = onValue(obrasRef, (snapshot) => {
         const data = snapshot.val();
-        if (data) {
-          const lista = Object.keys(data).map(id => ({ id, ...data[id] }));
-          setListaObras(lista.sort((a, b) => b.createdAt - a.createdAt));
-        } else {
-          setListaObras([]);
-        }
+        const lista = data ? Object.keys(data).map(id => ({ id, ...data[id] })) : [];
+        setObras(lista.sort((a, b) => b.createdAt - a.createdAt));
       });
+      return () => unsubscribe();
     }
   }, [isAuthenticated]);
 
-  const manejarLogin = (e) => {
+  const acceder = (e) => {
     e.preventDefault();
     if (pin === PIN_CORRECTO) {
       if (document.activeElement) document.activeElement.blur();
       setIsAuthenticated(true);
     } else {
-      setError(true);
+      setErrorPin(true);
       setPin("");
     }
   };
 
-  const guardarObra = (e) => {
+  const guardar = (e) => {
     e.preventDefault();
-    if (!obra.trim()) return;
+    if (!nuevaObra.trim()) return;
     if (document.activeElement) document.activeElement.blur();
-
     push(ref(realtimeDb, 'obras'), {
-      nombre: obra,
-      fecha: new Date().toLocaleString('es-ES'),
+      nombre: nuevaObra,
+      fecha: new Date().toLocaleString(),
       createdAt: serverTimestamp()
     });
-    setObra("");
+    setNuevaObra("");
   };
 
-  // 1. PANTALLA DE ACCESO
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-        <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-xs text-center">
-          <img src="/app-redes/logo-redes_Transparente-216x216.png" className="w-32 mx-auto mb-6" alt="Logo" />
-          <form onSubmit={manejarLogin}>
+      <div className="min-h-screen bg-red-600 flex flex-col items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-lg shadow-2xl w-full max-w-xs text-center">
+          <img src="/app-redes/logo-redes_Transparente-216x216.png" className="w-32 mx-auto mb-6" alt="Redes Carreras" />
+          <form onSubmit={acceder}>
             <input 
               type="password" 
               inputMode="numeric"
-              className={`w-full text-center text-3xl border-2 p-3 rounded-xl mb-4 outline-none ${error ? 'border-red-500 animate-pulse' : 'border-gray-100'}`}
+              className={`w-full text-center text-3xl border-2 p-2 rounded mb-4 outline-none ${errorPin ? 'border-red-500' : 'border-gray-200'}`}
               placeholder="PIN"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               autoFocus
             />
-            <button className="w-full bg-black text-white py-4 rounded-xl font-bold uppercase tracking-widest">Entrar</button>
+            <button className="w-full bg-red-600 text-white py-3 rounded font-bold uppercase tracking-wider">Acceder</button>
           </form>
         </div>
       </div>
     );
   }
 
-  // 2. APP REDES CARRERAS (4 MÓDULOS)
   return (
-    <div className="min-h-screen bg-gray-100 font-sans text-slate-900">
-      {/* HEADER */}
-      <header className="bg-white border-b p-4 sticky top-0 z-10 flex justify-between items-center">
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+      <header className="bg-red-600 text-white p-4 shadow-lg flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <HardHat className="text-orange-500" />
-          <span className="font-black text-lg">REDES CARRERAS</span>
+          <HardHat size={24} />
+          <h1 className="font-bold text-lg italic tracking-tight">REDES CARRERAS S.L.</h1>
         </div>
-        <button onClick={() => setIsAuthenticated(false)}><Lock size={20} className="text-gray-400" /></button>
+        <button onClick={() => setIsAuthenticated(false)} className="opacity-70"><Lock size={20} /></button>
       </header>
 
-      <main className="p-4 max-w-lg mx-auto grid grid-cols-1 gap-4">
-        
-        {/* MÓDULO 1: FORMULARIO DE ALTA */}
-        <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-          <div className="flex items-center gap-2 mb-4 text-blue-600">
-            <PlusCircle size={18} />
-            <h2 className="font-bold uppercase text-sm">Nueva Gestión</h2>
+      <main className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+        {/* MODULO 1: FORMULARIO */}
+        <section className="bg-white p-4 rounded shadow border-t-4 border-red-600">
+          <div className="flex items-center gap-2 mb-4 text-red-600">
+            <PlusCircle size={20} />
+            <h2 className="font-bold uppercase text-sm">Registro de Obras</h2>
           </div>
-          <form onSubmit={guardarObra} className="flex gap-2">
+          <form onSubmit={guardar} className="flex flex-col gap-2">
             <input 
               type="text" 
-              className="flex-1 bg-gray-50 border-none p-4 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Nombre de la obra o concepto..."
-              value={obra}
-              onChange={(e) => setObra(e.target.value)}
+              className="border p-3 rounded bg-gray-50 outline-none focus:border-red-600"
+              placeholder="Concepto de obra..."
+              value={nuevaObra}
+              onChange={(e) => setNuevaObra(e.target.value)}
             />
-            <button className="bg-black text-white px-6 rounded-xl font-bold">＋</button>
+            <button className="bg-red-600 text-white p-3 rounded font-bold">GUARDAR</button>
           </form>
         </section>
 
-        {/* MÓDULO 2: LISTADO EN TIEMPO REAL */}
-        <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-          <div className="flex items-center gap-2 mb-4 text-gray-500">
-            <ClipboardList size={18} />
-            <h2 className="font-bold uppercase text-sm">Registro de Actividad</h2>
+        {/* MODULO 2: LISTADO */}
+        <section className="bg-white p-4 rounded shadow border-t-4 border-red-600">
+          <div className="flex items-center gap-2 mb-4 text-red-600">
+            <List size={20} />
+            <h2 className="font-bold uppercase text-sm">Historial Reciente</h2>
           </div>
-          <div className="space-y-3">
-            {listaObras.map((o) => (
-              <div key={o.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {obras.map((o) => (
+              <div key={o.id} className="flex justify-between items-center p-3 bg-red-50 rounded border border-red-100">
                 <div className="flex-1 pr-4">
-                  <p className="font-bold text-sm leading-tight">{o.nombre}</p>
-                  <p className="text-[10px] text-gray-400 mt-1 uppercase font-medium">{o.fecha}</p>
+                  <p className="font-bold text-gray-800 leading-tight">{o.nombre}</p>
+                  <p className="text-[10px] text-gray-400 mt-1">{o.fecha}</p>
                 </div>
-                <button onClick={() => remove(ref(realtimeDb, `obras/${o.id}`))} className="text-gray-300 hover:text-red-500">
-                  <Trash2 size={18} />
-                </button>
+                <button onClick={() => remove(ref(realtimeDb, `obras/${o.id}`))} className="text-red-300 hover:text-red-600">✕</button>
               </div>
             ))}
-            {listaObras.length === 0 && <p className="text-center text-gray-300 py-4 text-sm font-medium italic">Sin datos registrados</p>}
           </div>
         </section>
 
-        {/* MÓDULO 3 Y 4: RESUMEN Y ESTADISTICAS */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-800 p-4 rounded-2xl text-white">
-            <p className="text-[10px] opacity-60 uppercase font-bold mb-1">Total Obras</p>
-            <p className="text-3xl font-black">{listaObras.length}</p>
-          </div>
-          <div className="bg-white p-4 rounded-2xl border border-gray-200 flex flex-col items-center justify-center">
-             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse mb-1"></div>
-             <p className="text-[10px] text-gray-400 font-bold uppercase">Online</p>
-          </div>
-        </div>
+        {/* MODULO 3: ESTADÍSTICAS */}
+        <section className="bg-white p-4 rounded shadow border-t-4 border-red-600 flex flex-col items-center justify-center">
+          <BarChart className="text-red-600 mb-2" size={30} />
+          <p className="text-3xl font-black text-red-600">{obras.length}</p>
+          <p className="text-[10px] uppercase font-bold text-gray-400">Total Registros</p>
+        </section>
 
+        {/* MODULO 4: AJUSTES / ESTADO */}
+        <section className="bg-white p-4 rounded shadow border-t-4 border-red-600 flex flex-col items-center justify-center">
+          <Settings className="text-red-600 mb-2 animate-spin-slow" size={30} />
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+            <p className="text-[10px] uppercase font-bold text-gray-400">Sistema Online</p>
+          </div>
+        </section>
       </main>
     </div>
   );
