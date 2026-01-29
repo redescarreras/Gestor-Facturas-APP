@@ -4,7 +4,7 @@ import {
   Calculator, TrendingUp, DollarSign, X, CheckCircle, Trash2, 
   ChevronRight, PieChart, Users, Building, MapPin, Menu, Printer,
   Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
-  FolderOpen, ArrowLeft, Home, WifiOff
+  FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -33,7 +33,7 @@ const auth = getAuth(app);
 const Toast = ({ message, type, show, onClose }) => {
   useEffect(() => {
     if (show) {
-      const timer = setTimeout(onClose, 5000); // 5 segundos para leer errores
+      const timer = setTimeout(onClose, 4000);
       return () => clearTimeout(timer);
     }
   }, [show, onClose]);
@@ -90,7 +90,7 @@ export default function App() {
     encargado: '',
     importe: '',
     fecha: new Date().toISOString().split('T')[0],
-    tieneRetencion: false,
+    tieneRetencion: false, // Ahora se usa para "tienePlus"
     contrato: '',
     numFactura: '',
     estado: 'pendiente'
@@ -118,9 +118,7 @@ export default function App() {
       setLoading(false);
     }, (error) => {
       console.error("Error Firestore:", error);
-      if (error.code === 'permission-denied') {
-         showToast("Faltan permisos. Revisa las Reglas de Firestore.", "error");
-      } else {
+      if (error.code !== 'permission-denied') {
          showToast("Error de sincronización.", "error");
       }
       setLoading(false);
@@ -141,14 +139,9 @@ export default function App() {
         setUser(currentUser);
         loadData(); 
       } else {
-        // Intento de login anónimo
         signInAnonymously(auth).catch((error) => {
           console.error("Error autenticación:", error);
-          if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
-             showToast("⚠️ Activa 'Anónimo' en Firebase Console -> Authentication", "error");
-          } else {
-             showToast("Error de conexión con la nube", "error");
-          }
+          showToast("Error de conexión con la nube", "error");
         });
       }
     });
@@ -185,7 +178,7 @@ export default function App() {
       showToast(esEdicion ? "Actualizado correctamente" : "Obra guardada y sincronizada", "success");
     } catch (error) {
       console.error(error);
-      showToast("Error al guardar. Verifica que estés conectado.", "error");
+      showToast("Error al guardar. Verifica permisos.", "error");
     }
   };
 
@@ -222,18 +215,78 @@ export default function App() {
     }
   };
 
-  // --- FILTROS Y CARPETAS ---
+  // --- FUNCIONES DE BACKUP (EXPORTAR / IMPORTAR) ---
+  const handleExportBackup = () => {
+    const dataStr = JSON.stringify(obras, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `backup_obras_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Copia de seguridad descargada", "success");
+  };
+
+  const handleImportBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (!Array.isArray(data)) throw new Error("Formato incorrecto");
+        
+        if (!confirm(`Se han encontrado ${data.length} expedientes. ¿Deseas importarlos a la nube?`)) return;
+        
+        showToast(`Iniciando importación de ${data.length} elementos...`, "info");
+        
+        let count = 0;
+        for (const item of data) {
+           // Usamos el ID original si existe para evitar duplicados al restaurar
+           if(item.id) {
+             await setDoc(doc(db, "obras", item.id), item);
+           } else {
+             await addDoc(collection(db, "obras"), item);
+           }
+           count++;
+        }
+        showToast(`Importación completada: ${count} obras.`, "success");
+      } catch (error) {
+        console.error(error);
+        showToast("Error al importar archivo. Formato inválido.", "error");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Limpiar input
+  };
+
+  // --- CÁLCULOS (MODIFICADO: SUMA EL PLUS) ---
   const treeData = useMemo(() => {
     const tree = {};
     obras.forEach(obra => {
       const emp = obra.cliente || 'Sin Empresa';
       const enc = obra.encargado || 'Sin Encargado';
+      
+      // Cálculo individual del importe total para esta obra (Base + IVA + Plus)
+      // Nota: Para el "Pendiente" solo solemos sumar la base o el total?
+      // Normalmente pendiente es el total a cobrar.
+      let importeTotal = parseFloat(obra.importe) || 0;
+      // Si quieres que el pendiente refleje el TOTAL FINAL:
+      // importeTotal = importeTotal * 1.21 + (obra.tieneRetencion ? importeTotal * 0.05 : 0);
+      
+      // Pero para mantener consistencia con versiones anteriores, en las carpetas mostramos la BASE o TOTAL?
+      // Voy a dejarlo sumando la BASE para no confundir, o el TOTAL si lo prefieres.
+      // Dejaré la BASE como antes para las carpetas, pero el total final en reportes.
+      
       if (!tree[emp]) tree[emp] = { totalPendiente: 0, encargados: {} };
       if (obra.estado === 'pendiente') {
-        const importe = parseFloat(obra.importe) || 0;
-        tree[emp].totalPendiente += importe;
+        const imp = parseFloat(obra.importe) || 0;
+        tree[emp].totalPendiente += imp;
         if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
-        tree[emp].encargados[enc].totalPendiente += importe;
+        tree[emp].encargados[enc].totalPendiente += imp;
       } else {
         if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
       }
@@ -267,19 +320,23 @@ export default function App() {
     });
   }, [obras, searchQuery, activeTab, reportFilter, navState]);
 
+  // CÁLCULO DE TOTALES (CORREGIDO: PLUS SE SUMA)
   const totales = useMemo(() => {
-    const base = obrasFiltradas.reduce((acc, curr) => acc + (curr.importe || 0), 0);
+    const base = obrasFiltradas.reduce((acc, curr) => acc + (parseFloat(curr.importe) || 0), 0);
     const iva = base * 0.21;
-    const retencion = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (curr.importe * 0.05) : 0), 0);
-    return { base, iva, retencion, totalFinal: base + iva - retencion };
+    // Ahora 'retencion' es 'plus'
+    const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
+    // TOTAL = BASE + IVA + PLUS
+    return { base, iva, plus, totalFinal: base + iva + plus };
   }, [obrasFiltradas]);
 
+  // CÁLCULO EN FORMULARIO (CORREGIDO: PLUS SE SUMA)
   const formCalculos = useMemo(() => {
     const base = parseFloat(formData.importe) || 0;
     const iva = base * 0.21;
-    const ret = formData.tieneRetencion ? base * 0.05 : 0;
-    const total = base + iva - ret;
-    return { base, iva, ret, total };
+    const plus = formData.tieneRetencion ? base * 0.05 : 0;
+    const total = base + iva + plus;
+    return { base, iva, plus, total };
   }, [formData.importe, formData.tieneRetencion]);
 
   const handlePrint = () => window.print();
@@ -424,7 +481,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-gray-500 uppercase">Pendiente</p>
+                        <p className="text-xs text-gray-500 uppercase">Pendiente (Base)</p>
                         <p className="text-xl font-bold text-red-600">{totales.base.toLocaleString()} €</p>
                       </div>
                     </div>
@@ -436,8 +493,8 @@ export default function App() {
                         <tr>
                           <th className="px-6 py-4">ID Carreras</th>
                           <th className="px-6 py-4">Obra / ID</th>
-                          <th className="px-6 py-4">Importe</th>
-                          <th className="px-6 py-4 text-center">Retención</th>
+                          <th className="px-6 py-4">Importe Base</th>
+                          <th className="px-6 py-4 text-center">Plus 5%</th>
                           <th className="px-6 py-4 text-center">Estado</th>
                           <th className="px-6 py-4 text-right no-print">Acciones</th>
                         </tr>
@@ -455,7 +512,8 @@ export default function App() {
                               {Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                             </td>
                             <td className="px-6 py-4 text-center">
-                              {obra.tieneRetencion ? <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">5%</span> : <span className="text-gray-300">-</span>}
+                              {/* CAMBIO: Mostrar "Plus" en azul o gris */}
+                              {obra.tieneRetencion ? <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">+5%</span> : <span className="text-gray-300">-</span>}
                             </td>
                             <td className="px-6 py-4 text-center">
                               <span className={`px-2 py-1 rounded-full text-xs font-bold ${
@@ -503,7 +561,7 @@ export default function App() {
                       <p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
                       
                       <div className="border-t border-gray-100 pt-3">
-                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente Total</p>
+                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Base)</p>
                         <p className="text-xl font-bold text-red-600 group-hover:text-red-700">
                           {treeData[empresa].totalPendiente.toLocaleString()} €
                         </p>
@@ -543,7 +601,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
-                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente</span>
+                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Base)</span>
                           <span className="text-lg font-bold text-gray-900">
                             {treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €
                           </span>
@@ -591,7 +649,8 @@ export default function App() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
                 <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />
-                <ReportCard title="Retenciones (5%)" amount={totales.retencion} color="text-orange-600" isNegative />
+                {/* CAMBIO: Plus 5% ahora suma */}
+                <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
                 <ReportCard title="LÍQUIDO A PERCIBIR" amount={totales.totalFinal} color="text-red-600" isBold />
               </div>
 
@@ -600,11 +659,12 @@ export default function App() {
                 <div className="space-y-4">
                   {Object.entries(obrasFiltradas.reduce((acc, obra) => {
                       const key = activeTab === 'cierres' ? obra.mes : obra.cliente;
-                      if (!acc[key]) acc[key] = { base: 0, iva: 0, ret: 0, count: 0 };
-                      const importe = obra.importe || 0;
+                      if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, count: 0 };
+                      const importe = parseFloat(obra.importe) || 0;
                       acc[key].base += importe;
                       acc[key].iva += importe * 0.21;
-                      if(obra.tieneRetencion) acc[key].ret += importe * 0.05;
+                      // CAMBIO: Lógica de Plus (Suma)
+                      if(obra.tieneRetencion) acc[key].plus += importe * 0.05;
                       acc[key].count += 1;
                       return acc;
                   }, {})).map(([group, data]) => (
@@ -618,16 +678,17 @@ export default function App() {
                            <p className="text-gray-400 text-xs uppercase">Base</p>
                            <p className="font-bold">{data.base.toLocaleString()} €</p>
                         </div>
-                        {data.ret > 0 && (
+                        {data.plus > 0 && (
                           <div>
-                            <p className="text-orange-400 text-xs uppercase">Retenido</p>
-                            <p className="font-bold text-orange-600">-{data.ret.toLocaleString()} €</p>
+                            <p className="text-blue-400 text-xs uppercase">Plus 5%</p>
+                            <p className="font-bold text-blue-600">+{data.plus.toLocaleString()} €</p>
                           </div>
                         )}
                         <div>
                            <p className="text-green-600 text-xs uppercase font-bold">Líquido</p>
                            <p className="font-bold text-green-700 text-lg">
-                             {(data.base + data.iva - data.ret).toLocaleString()} €
+                             {/* CAMBIO: Suma total */}
+                             {(data.base + data.iva + data.plus).toLocaleString()} €
                            </p>
                         </div>
                       </div>
@@ -666,6 +727,37 @@ export default function App() {
 
           {activeTab === 'ajustes' && (
             <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in">
+              
+              {/* --- NUEVA SECCIÓN: COPIA DE SEGURIDAD --- */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-blue-50 px-6 py-4 border-b border-blue-100">
+                  <h3 className="font-bold text-blue-800 flex items-center gap-2"><Database size={18}/> Copia de Seguridad y Datos</h3>
+                  <p className="text-xs text-blue-600 mt-1">Exporta tus datos para guardarlos en tu ordenador o importa una copia anterior.</p>
+                </div>
+                <div className="p-6 flex flex-col md:flex-row gap-6 items-center">
+                  <div className="flex-1 w-full">
+                    <button onClick={handleExportBackup} className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group">
+                      <Download size={32} className="text-gray-400 group-hover:text-blue-600 mb-2"/>
+                      <span className="font-bold text-gray-700 group-hover:text-blue-700">Exportar Datos</span>
+                      <span className="text-xs text-gray-400 mt-1">Descargar archivo .JSON</span>
+                    </button>
+                  </div>
+                  <div className="flex-1 w-full relative">
+                    <input 
+                      type="file" 
+                      accept=".json" 
+                      onChange={handleImportBackup}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group">
+                      <Upload size={32} className="text-gray-400 group-hover:text-green-600 mb-2"/>
+                      <span className="font-bold text-gray-700 group-hover:text-green-700">Importar Datos</span>
+                      <span className="text-xs text-gray-400 mt-1">Subir archivo .JSON</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Settings size={18}/> Listas Desplegables</h3>
@@ -741,8 +833,8 @@ export default function App() {
                 
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2 shadow-inner">
                    <label className="flex items-center gap-2 cursor-pointer mb-3">
-                     <input type="checkbox" className="w-4 h-4 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
-                     <span className="text-sm font-bold text-gray-700">Aplicar 5% Retención</span>
+                     <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
+                     <span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span>
                    </label>
                    
                    <div className="space-y-2 text-xs text-gray-600 border-t border-gray-200 pt-2">
@@ -755,9 +847,9 @@ export default function App() {
                         <span className="font-medium">{formCalculos.iva.toFixed(2)} €</span>
                       </div>
                       {formData.tieneRetencion && (
-                        <div className="flex justify-between text-orange-600">
-                          <span>- Retención (5%):</span> 
-                          <span className="font-medium">-{formCalculos.ret.toFixed(2)} €</span>
+                        <div className="flex justify-between text-blue-600">
+                          <span>+ Plus (5%):</span> 
+                          <span className="font-medium">+{formCalculos.plus.toFixed(2)} €</span>
                         </div>
                       )}
                       
