@@ -33,7 +33,7 @@ const auth = getAuth(app);
 const Toast = ({ message, type, show, onClose }) => {
   useEffect(() => {
     if (show) {
-      const timer = setTimeout(onClose, 4000);
+      const timer = setTimeout(onClose, 5000); // 5 segundos para leer errores
       return () => clearTimeout(timer);
     }
   }, [show, onClose]);
@@ -107,24 +107,7 @@ export default function App() {
     setNotification({ show: true, message: msg, type });
   };
 
-  // --- AUTENTICACIÓN Y CARGA DE DATOS ---
-  useEffect(() => {
-    // 1. Autenticación Anónima (Vital para poder leer/escribir en Firebase)
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        loadData(); 
-      } else {
-        signInAnonymously(auth).catch((error) => {
-          console.error("Error autenticación:", error);
-          showToast("Error de conexión con la nube", "error");
-        });
-      }
-    });
-
-    return () => unsubscribeAuth();
-  }, []);
-
+  // --- CARGA DE DATOS ---
   const loadData = () => {
     // 2. Escuchar Obras
     const q = query(collection(db, "obras"));
@@ -135,8 +118,9 @@ export default function App() {
       setLoading(false);
     }, (error) => {
       console.error("Error Firestore:", error);
-      // Solo mostramos error si no es por permisos iniciales
-      if (error.code !== 'permission-denied') {
+      if (error.code === 'permission-denied') {
+         showToast("Faltan permisos. Revisa las Reglas de Firestore.", "error");
+      } else {
          showToast("Error de sincronización.", "error");
       }
       setLoading(false);
@@ -150,10 +134,32 @@ export default function App() {
     });
   };
 
+  // --- AUTENTICACIÓN ---
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        loadData(); 
+      } else {
+        // Intento de login anónimo
+        signInAnonymously(auth).catch((error) => {
+          console.error("Error autenticación:", error);
+          if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
+             showToast("⚠️ Activa 'Anónimo' en Firebase Console -> Authentication", "error");
+          } else {
+             showToast("Error de conexión con la nube", "error");
+          }
+        });
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
   // --- LÓGICA DE NEGOCIO ---
   const handleSaveObra = async (e) => {
     e.preventDefault();
-    if (!user) { showToast("Conectando...", "info"); return; }
+    if (!user) { showToast("Esperando conexión...", "info"); return; }
 
     const obraData = {
       ...formData,
@@ -179,7 +185,7 @@ export default function App() {
       showToast(esEdicion ? "Actualizado correctamente" : "Obra guardada y sincronizada", "success");
     } catch (error) {
       console.error(error);
-      showToast("Error al guardar. Verifica permisos.", "error");
+      showToast("Error al guardar. Verifica que estés conectado.", "error");
     }
   };
 
