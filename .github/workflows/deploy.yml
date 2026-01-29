@@ -1,0 +1,58 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ["main"] # Se activa al subir cambios
+  workflow_dispatch:   # Permite activar el despliegue manualmente desde la pestaña Actions
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          
+      # CAMBIO IMPORTANTE: Usamos 'install' en lugar de 'ci' para evitar errores si falta el package-lock.json
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Build
+        run: npm run build
+
+      # DIAGNÓSTICO: Listar archivos para asegurar que dist se creó y contiene el manifest
+      - name: Check dist content
+        run: ls -R ./dist
+
+      # Crear .nojekyll para evitar errores 404 en archivos estáticos
+      - name: Disable Jekyll
+        run: touch ./dist/.nojekyll
+        
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
