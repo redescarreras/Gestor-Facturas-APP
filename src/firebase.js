@@ -4,21 +4,19 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getDatabase } from "firebase/database"; 
 
 const firebaseConfig = {
+  // --- PEGA AQUÍ TUS CLAVES DE FIREBASE DE LA CONSOLA ---
   apiKey: "TU_API_KEY",
   authDomain: "TU_PROJECT_ID.firebaseapp.com",
   projectId: "TU_PROJECT_ID",
   storageBucket: "TU_PROJECT_ID.appspot.com",
   messagingSenderId: "TU_NUMERO",
-  appId: "TU_APP_ID",
-  // La URL de Realtime Database (la ves en la consola de Firebase)
-  databaseURL: "https://TU_PROJECT_ID-default-rtdb.firebaseio.com" 
+  appId: "TU_APP_ID"
 };
 
-// Inicializar Firebase
 const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+const realtimeDb = getDatabase(app); 
 
-// Exportar los servicios que necesitas
-export const db = getFirestore(app);         // Firestore
-export const auth = getAuth(app);            // Autenticación
-export const googleProvider = new GoogleAuthProvider();
-export const realtimeDb = getDatabase(app);  // Realtime Database
+export { db, auth, googleProvider, realtimeDb };
