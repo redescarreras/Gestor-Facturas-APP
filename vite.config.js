@@ -4,5 +4,6 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './', // Ruta relativa vital para GitHub Pages
+  // IMPORTANTE: Nombre exacto de tu repositorio entre barras
+  base: '/Gestor-Facturas-APP/',
 })
