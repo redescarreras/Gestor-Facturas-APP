@@ -4,7 +4,7 @@ import {
   Calculator, TrendingUp, DollarSign, X, CheckCircle, Trash2, 
   ChevronRight, PieChart, Users, Building, MapPin, Menu, Printer,
   Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
-  FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database
+  FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database, CalendarRange
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -97,10 +97,16 @@ export default function App() {
   };
   const [formData, setFormData] = useState(initialObraState);
 
+  // Filtros Reportes
   const [reportFilter, setReportFilter] = useState({
     empresa: 'Todas',
-    encargado: 'Todos',
-    mes: 'Todos'
+    encargado: 'Todos'
+  });
+
+  // Filtros Cierre Flexible
+  const [closingRange, setClosingRange] = useState({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0], // Primer día del mes
+    end: new Date().toISOString().split('T')[0] // Hoy
   });
 
   const showToast = (msg, type = 'success') => {
@@ -109,7 +115,6 @@ export default function App() {
 
   // --- CARGA DE DATOS ---
   const loadData = () => {
-    // 2. Escuchar Obras
     const q = query(collection(db, "obras"));
     const unsubscribeObras = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -124,7 +129,6 @@ export default function App() {
       setLoading(false);
     });
 
-    // 3. Escuchar Configuración
     const configRef = doc(db, "configuracion", "listas_generales");
     const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
       if (docSnap.exists()) setConfig(docSnap.data());
@@ -145,7 +149,6 @@ export default function App() {
         });
       }
     });
-
     return () => unsubscribeAuth();
   }, []);
 
@@ -215,7 +218,6 @@ export default function App() {
     }
   };
 
-  // --- FUNCIONES DE BACKUP (EXPORTAR / IMPORTAR) ---
   const handleExportBackup = () => {
     const dataStr = JSON.stringify(obras, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -232,68 +234,29 @@ export default function App() {
   const handleImportBackup = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target.result);
         if (!Array.isArray(data)) throw new Error("Formato incorrecto");
-        
         if (!confirm(`Se han encontrado ${data.length} expedientes. ¿Deseas importarlos a la nube?`)) return;
-        
-        showToast(`Iniciando importación de ${data.length} elementos...`, "info");
-        
+        showToast(`Iniciando importación...`, "info");
         let count = 0;
         for (const item of data) {
-           // Usamos el ID original si existe para evitar duplicados al restaurar
-           if(item.id) {
-             await setDoc(doc(db, "obras", item.id), item);
-           } else {
-             await addDoc(collection(db, "obras"), item);
-           }
+           if(item.id) await setDoc(doc(db, "obras", item.id), item);
+           else await addDoc(collection(db, "obras"), item);
            count++;
         }
         showToast(`Importación completada: ${count} obras.`, "success");
       } catch (error) {
-        console.error(error);
-        showToast("Error al importar archivo. Formato inválido.", "error");
+        showToast("Error al importar. Formato inválido.", "error");
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Limpiar input
+    e.target.value = '';
   };
 
-  // --- CÁLCULOS (MODIFICADO: SUMA EL PLUS) ---
-  const treeData = useMemo(() => {
-    const tree = {};
-    obras.forEach(obra => {
-      const emp = obra.cliente || 'Sin Empresa';
-      const enc = obra.encargado || 'Sin Encargado';
-      
-      // Cálculo individual del importe total para esta obra (Base + IVA + Plus)
-      // Nota: Para el "Pendiente" solo solemos sumar la base o el total?
-      // Normalmente pendiente es el total a cobrar.
-      let importeTotal = parseFloat(obra.importe) || 0;
-      // Si quieres que el pendiente refleje el TOTAL FINAL:
-      // importeTotal = importeTotal * 1.21 + (obra.tieneRetencion ? importeTotal * 0.05 : 0);
-      
-      // Pero para mantener consistencia con versiones anteriores, en las carpetas mostramos la BASE o TOTAL?
-      // Voy a dejarlo sumando la BASE para no confundir, o el TOTAL si lo prefieres.
-      // Dejaré la BASE como antes para las carpetas, pero el total final en reportes.
-      
-      if (!tree[emp]) tree[emp] = { totalPendiente: 0, encargados: {} };
-      if (obra.estado === 'pendiente') {
-        const imp = parseFloat(obra.importe) || 0;
-        tree[emp].totalPendiente += imp;
-        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
-        tree[emp].encargados[enc].totalPendiente += imp;
-      } else {
-        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
-      }
-    });
-    return tree;
-  }, [obras]);
-
+  // --- CÁLCULOS PRINCIPALES ---
   const obrasFiltradas = useMemo(() => {
     return obras.filter(o => {
       const matchSearch = 
@@ -304,11 +267,16 @@ export default function App() {
       
       if (searchQuery) return matchSearch;
 
-      if (activeTab === 'reportes' || activeTab === 'cierres') {
+      if (activeTab === 'reportes') {
         const matchEmpresa = reportFilter.empresa === 'Todas' || o.cliente === reportFilter.empresa;
         const matchEncargado = reportFilter.encargado === 'Todos' || o.encargado === reportFilter.encargado;
-        const matchMes = reportFilter.mes === 'Todos' || o.mes === reportFilter.mes;
-        return matchSearch && matchEmpresa && matchEncargado && matchMes;
+        return matchEmpresa && matchEncargado;
+      }
+
+      if (activeTab === 'cierres') {
+        // FILTRO POR RANGO DE FECHAS PERSONALIZADO
+        if (!closingRange.start || !closingRange.end) return true;
+        return o.fecha >= closingRange.start && o.fecha <= closingRange.end;
       }
 
       if (activeTab === 'panel') {
@@ -318,25 +286,52 @@ export default function App() {
       }
       return matchSearch;
     });
-  }, [obras, searchQuery, activeTab, reportFilter, navState]);
+  }, [obras, searchQuery, activeTab, reportFilter, navState, closingRange]);
 
-  // CÁLCULO DE TOTALES (CORREGIDO: PLUS SE SUMA)
+  // Totales Genéricos (Se calculan sobre lo filtrado)
   const totales = useMemo(() => {
     const base = obrasFiltradas.reduce((acc, curr) => acc + (parseFloat(curr.importe) || 0), 0);
     const iva = base * 0.21;
-    // Ahora 'retencion' es 'plus'
     const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
-    // TOTAL = BASE + IVA + PLUS
-    return { base, iva, plus, totalFinal: base + iva + plus };
+    // TOTAL CON IVA
+    const totalConIva = base + iva + plus;
+    // TOTAL SIN IVA (Para Panel)
+    const totalSinIva = base + plus;
+    return { base, iva, plus, totalConIva, totalSinIva };
   }, [obrasFiltradas]);
 
-  // CÁLCULO EN FORMULARIO (CORREGIDO: PLUS SE SUMA)
+  // Totales para Carpetas (Solo pendientes, y SIN IVA según petición)
+  const treeData = useMemo(() => {
+    const tree = {};
+    obras.forEach(obra => {
+      const emp = obra.cliente || 'Sin Empresa';
+      const enc = obra.encargado || 'Sin Encargado';
+      
+      if (!tree[emp]) tree[emp] = { totalPendiente: 0, encargados: {} };
+      
+      if (obra.estado === 'pendiente') {
+        const base = parseFloat(obra.importe) || 0;
+        const plus = obra.tieneRetencion ? base * 0.05 : 0;
+        // Petición: Total Pendiente = Base + Plus (SIN IVA)
+        const totalObra = base + plus;
+
+        tree[emp].totalPendiente += totalObra;
+        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
+        tree[emp].encargados[enc].totalPendiente += totalObra;
+      } else {
+        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
+      }
+    });
+    return tree;
+  }, [obras]);
+
+  // Cálculos en vivo para el Formulario (SIN IVA en el Total principal)
   const formCalculos = useMemo(() => {
     const base = parseFloat(formData.importe) || 0;
     const iva = base * 0.21;
     const plus = formData.tieneRetencion ? base * 0.05 : 0;
-    const total = base + iva + plus;
-    return { base, iva, plus, total };
+    const totalSinIva = base + plus; 
+    return { base, iva, plus, totalSinIva };
   }, [formData.importe, formData.tieneRetencion]);
 
   const handlePrint = () => window.print();
@@ -361,6 +356,7 @@ export default function App() {
           body { background: white !important; font-size: 11px; color: black; }
           .print-header { display: flex !important; margin-bottom: 30px; border-bottom: 2px solid #cc0000; padding-bottom: 15px; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
           .card-resumen { border: 1px solid #ddd !important; box-shadow: none !important; margin-bottom: 15px; page-break-inside: avoid; }
+          .break-page { page-break-before: always; }
           table { width: 100%; border-collapse: collapse; margin-top: 10px; }
           th, td { padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
           th { background-color: #f0f0f0 !important; font-weight: bold; color: black !important; }
@@ -381,7 +377,7 @@ export default function App() {
         <nav className="flex-1 p-4 space-y-2">
           <NavButton icon={LayoutGrid} label="Panel Principal" active={activeTab === 'panel'} onClick={() => setActiveTab('panel')} />
           <NavButton icon={FileText} label="Reportes" active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} />
-          <NavButton icon={Calendar} label="Cierres / Mensual" active={activeTab === 'cierres'} onClick={() => setActiveTab('cierres')} />
+          <NavButton icon={Calendar} label="Cierres Personalizados" active={activeTab === 'cierres'} onClick={() => setActiveTab('cierres')} />
           <NavButton icon={Settings} label="Ajustes" active={activeTab === 'ajustes'} onClick={() => setActiveTab('ajustes')} />
         </nav>
       </aside>
@@ -400,7 +396,7 @@ export default function App() {
           </div>
           <div className="text-right text-xs text-gray-500">
              <p className="font-bold">{new Date().toLocaleDateString()}</p>
-             <p>Gestión Cloud</p>
+             {activeTab === 'cierres' && <p>Periodo: {new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p>}
           </div>
         </div>
 
@@ -408,8 +404,8 @@ export default function App() {
         <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10 no-print">
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
             {activeTab === 'panel' && <><LayoutGrid className="text-red-600"/> Panel Principal</>}
-            {activeTab === 'reportes' && <><FileText className="text-red-600"/> Reportes</>}
-            {activeTab === 'cierres' && <><Calendar className="text-red-600"/> Cierres de Mes</>}
+            {activeTab === 'reportes' && <><FileText className="text-red-600"/> Reportes Generales</>}
+            {activeTab === 'cierres' && <><Calendar className="text-red-600"/> Cierre de Mes / Periodo</>}
             {activeTab === 'ajustes' && <><Settings className="text-red-600"/> Ajustes</>}
           </h2>
           <div className="flex items-center gap-4">
@@ -481,8 +477,8 @@ export default function App() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-gray-500 uppercase">Pendiente (Base)</p>
-                        <p className="text-xl font-bold text-red-600">{totales.base.toLocaleString()} €</p>
+                        <p className="text-xs text-gray-500 uppercase">Pendiente (Sin IVA)</p>
+                        <p className="text-xl font-bold text-red-600">{totales.totalSinIva.toLocaleString()} €</p>
                       </div>
                     </div>
                   )}
@@ -512,7 +508,6 @@ export default function App() {
                               {Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                             </td>
                             <td className="px-6 py-4 text-center">
-                              {/* CAMBIO: Mostrar "Plus" en azul o gris */}
                               {obra.tieneRetencion ? <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">+5%</span> : <span className="text-gray-300">-</span>}
                             </td>
                             <td className="px-6 py-4 text-center">
@@ -532,9 +527,6 @@ export default function App() {
                             </td>
                           </tr>
                         ))}
-                        {obrasFiltradas.length === 0 && (
-                          <tr><td colSpan="6" className="p-8 text-center text-gray-400">No se encontraron expedientes.</td></tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
@@ -561,7 +553,7 @@ export default function App() {
                       <p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
                       
                       <div className="border-t border-gray-100 pt-3">
-                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Base)</p>
+                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Sin IVA)</p>
                         <p className="text-xl font-bold text-red-600 group-hover:text-red-700">
                           {treeData[empresa].totalPendiente.toLocaleString()} €
                         </p>
@@ -601,7 +593,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
-                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Base)</span>
+                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span>
                           <span className="text-lg font-bold text-gray-900">
                             {treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €
                           </span>
@@ -614,108 +606,133 @@ export default function App() {
             </div>
           )}
 
-          {/* REPORTES, CIERRES, AJUSTES Y MODAL */}
+          {/* VISTA: REPORTES Y CIERRES */}
           {(activeTab === 'reportes' || activeTab === 'cierres') && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
                 <div className="flex items-center gap-2 text-gray-500 font-bold text-sm mr-2">
                   <Filter size={18} /> FILTRAR:
                 </div>
-                <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}>
-                  <option value="Todas">Todas las Empresas</option>
-                  {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-                <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}>
-                  <option value="Todos">Todos los Encargados</option>
-                  {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-                {activeTab === 'cierres' && (
-                  <select className="input-filter" value={reportFilter.mes} onChange={(e) => setReportFilter({...reportFilter, mes: e.target.value})}>
-                    <option value="Todos">Todos los Meses</option>
-                    {[...new Set(obras.map(o => o.mes))].map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+                
+                {activeTab === 'reportes' && (
+                  <>
+                    <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}>
+                      <option value="Todas">Todas las Empresas</option>
+                      {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                    <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}>
+                      <option value="Todos">Todos los Encargados</option>
+                      {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                  </>
                 )}
+
+                {activeTab === 'cierres' && (
+                  <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
+                    <span className="text-xs font-bold text-gray-500 pl-2">Desde:</span>
+                    <input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.start} onChange={e => setClosingRange({...closingRange, start: e.target.value})} />
+                    <span className="text-xs font-bold text-gray-500">Hasta:</span>
+                    <input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.end} onChange={e => setClosingRange({...closingRange, end: e.target.value})} />
+                  </div>
+                )}
+
                 <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg">
-                  <Download size={16} /> Descargar PDF / Imprimir
+                  <Download size={16} /> Imprimir / PDF
                 </button>
               </div>
 
-              {activeTab === 'cierres' && reportFilter.mes !== 'Todos' && (
-                <div className="mb-4 border-b-2 border-red-600 pb-2">
-                  <h3 className="text-xl font-bold uppercase text-gray-800">Cierre Mensual: {reportFilter.mes}</h3>
+              {activeTab === 'cierres' && (
+                <div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end">
+                  <h3 className="text-xl font-bold uppercase text-gray-800">Cierre del Periodo</h3>
+                  <p className="text-sm font-medium text-gray-500">{new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p>
                 </div>
               )}
 
+              {/* TARJETAS RESUMEN (SIEMPRE MUESTRAN TODO) */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
                 <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />
-                {/* CAMBIO: Plus 5% ahora suma */}
                 <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
-                <ReportCard title="LÍQUIDO A PERCIBIR" amount={totales.totalFinal} color="text-red-600" isBold />
+                <ReportCard title="TOTAL FACTURACIÓN" amount={totales.totalConIva} color="text-red-600" isBold />
               </div>
 
+              {/* DESGLOSE POR EMPRESA (TABLA 1) */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen">
-                <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Desglose Detallado</h3>
+                <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Desglose por Empresa</h3>
                 <div className="space-y-4">
                   {Object.entries(obrasFiltradas.reduce((acc, obra) => {
-                      const key = activeTab === 'cierres' ? obra.mes : obra.cliente;
+                      const key = obra.cliente;
                       if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, count: 0 };
                       const importe = parseFloat(obra.importe) || 0;
                       acc[key].base += importe;
                       acc[key].iva += importe * 0.21;
-                      // CAMBIO: Lógica de Plus (Suma)
                       if(obra.tieneRetencion) acc[key].plus += importe * 0.05;
                       acc[key].count += 1;
                       return acc;
                   }, {})).map(([group, data]) => (
                     <div key={group} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-100 transition-all">
-                      <div className="mb-2 sm:mb-0">
+                      <div className="mb-2 sm:mb-0 w-1/4">
                         <p className="font-bold text-gray-900">{group}</p>
                         <p className="text-xs text-gray-500">{data.count} expedientes</p>
                       </div>
-                      <div className="text-right flex gap-6 text-sm">
-                        <div>
-                           <p className="text-gray-400 text-xs uppercase">Base</p>
-                           <p className="font-bold">{data.base.toLocaleString()} €</p>
-                        </div>
-                        {data.plus > 0 && (
-                          <div>
-                            <p className="text-blue-400 text-xs uppercase">Plus 5%</p>
-                            <p className="font-bold text-blue-600">+{data.plus.toLocaleString()} €</p>
-                          </div>
-                        )}
-                        <div>
-                           <p className="text-green-600 text-xs uppercase font-bold">Líquido</p>
-                           <p className="font-bold text-green-700 text-lg">
-                             {/* CAMBIO: Suma total */}
-                             {(data.base + data.iva + data.plus).toLocaleString()} €
-                           </p>
-                        </div>
+                      <div className="text-right flex-1 flex justify-end gap-6 text-sm">
+                        <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
+                        <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
+                        <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
+                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus).toLocaleString()} €</p></div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
+              {/* DESGLOSE POR ENCARGADO (TABLA 2 - Solo en Cierres para no saturar Reportes) */}
+              {activeTab === 'cierres' && (
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen break-page">
+                  <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Producción por Encargado</h3>
+                  <div className="space-y-4">
+                    {Object.entries(obrasFiltradas.reduce((acc, obra) => {
+                        const key = obra.encargado;
+                        if (!acc[key]) acc[key] = { base: 0, count: 0 };
+                        const importe = parseFloat(obra.importe) || 0;
+                        acc[key].base += importe;
+                        acc[key].count += 1;
+                        return acc;
+                    }, {})).map(([encargado, data]) => (
+                      <div key={encargado} className="flex justify-between items-center p-2 border-b border-gray-50 last:border-0">
+                        <span className="font-medium text-gray-700">{encargado}</span>
+                        <div className="text-right">
+                          <span className="text-sm font-bold block">{data.base.toLocaleString()} € (Base)</span>
+                          <span className="text-xs text-gray-400">{data.count} obras</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* LISTA DETALLADA */}
               {activeTab === 'cierres' && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6">
-                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Relación de Obras Entregadas</h3>
+                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Obras</h3>
                    <table className="w-full text-xs text-left">
                      <thead>
-                       <tr className="border-b">
-                         <th className="py-2">Fecha</th>
-                         <th className="py-2">ID</th>
-                         <th className="py-2">Obra</th>
-                         <th className="py-2 text-right">Base</th>
+                       <tr className="border-b bg-gray-50">
+                         <th className="py-2 px-2">Fecha</th>
+                         <th className="py-2 px-2">ID</th>
+                         <th className="py-2 px-2">Cliente</th>
+                         <th className="py-2 px-2">Obra</th>
+                         <th className="py-2 px-2 text-right">Base</th>
                        </tr>
                      </thead>
                      <tbody>
                        {obrasFiltradas.map(o => (
                          <tr key={o.id} className="border-b border-gray-50">
-                           <td className="py-1">{new Date(o.fecha).toLocaleDateString()}</td>
-                           <td className="py-1">{o.idCarreras}</td>
-                           <td className="py-1">{o.nombre}</td>
-                           <td className="py-1 text-right">{Number(o.importe).toLocaleString()} €</td>
+                           <td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td>
+                           <td className="py-1 px-2 font-mono">{o.idCarreras}</td>
+                           <td className="py-1 px-2">{o.cliente}</td>
+                           <td className="py-1 px-2">{o.nombre}</td>
+                           <td className="py-1 px-2 text-right font-medium">{Number(o.importe).toLocaleString()} €</td>
                          </tr>
                        ))}
                      </tbody>
@@ -727,8 +744,6 @@ export default function App() {
 
           {activeTab === 'ajustes' && (
             <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in">
-              
-              {/* --- NUEVA SECCIÓN: COPIA DE SEGURIDAD --- */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-blue-50 px-6 py-4 border-b border-blue-100">
                   <h3 className="font-bold text-blue-800 flex items-center gap-2"><Database size={18}/> Copia de Seguridad y Datos</h3>
@@ -743,12 +758,7 @@ export default function App() {
                     </button>
                   </div>
                   <div className="flex-1 w-full relative">
-                    <input 
-                      type="file" 
-                      accept=".json" 
-                      onChange={handleImportBackup}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    />
+                    <input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
                     <div className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group">
                       <Upload size={32} className="text-gray-400 group-hover:text-green-600 mb-2"/>
                       <span className="font-bold text-gray-700 group-hover:text-green-700">Importar Datos</span>
@@ -784,7 +794,6 @@ export default function App() {
             </div>
             
             <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Sección 1 */}
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="ID Carreras">
                   <input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" />
@@ -797,7 +806,6 @@ export default function App() {
                 </InputGroup>
               </div>
 
-              {/* Sección 2 */}
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="Nombre Obra">
                   <textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
@@ -816,7 +824,6 @@ export default function App() {
                 </InputGroup>
               </div>
 
-              {/* Sección 3 */}
               <div className="space-y-4 md:col-span-1">
                 <InputGroup label="Fecha">
                    <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
@@ -837,15 +844,14 @@ export default function App() {
                      <span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span>
                    </label>
                    
+                   {/* DESGLOSE EN VIVO - SOLO BASE + PLUS (SIN IVA AQUI) */}
                    <div className="space-y-2 text-xs text-gray-600 border-t border-gray-200 pt-2">
                       <div className="flex justify-between">
                         <span>Base:</span> 
                         <span className="font-medium">{formCalculos.base.toFixed(2)} €</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span>+ IVA (21%):</span> 
-                        <span className="font-medium">{formCalculos.iva.toFixed(2)} €</span>
-                      </div>
+                      {/* IVA OCULTO EN ESTA FASE POR PETICIÓN USUARIO */}
+                      
                       {formData.tieneRetencion && (
                         <div className="flex justify-between text-blue-600">
                           <span>+ Plus (5%):</span> 
@@ -854,9 +860,10 @@ export default function App() {
                       )}
                       
                       <div className="flex justify-between font-black text-gray-900 text-lg pt-2 border-t border-gray-200 mt-2">
-                        <span>TOTAL:</span> 
-                        <span>{formCalculos.total.toFixed(2)} €</span>
+                        <span>TOTAL ESTIMADO:</span> 
+                        <span>{formCalculos.totalSinIva.toFixed(2)} €</span>
                       </div>
+                      <p className="text-[10px] text-gray-400 text-center mt-1">* IVA (21%) se calculará en el cierre.</p>
                    </div>
                 </div>
 
@@ -888,35 +895,19 @@ export default function App() {
 
 function ConfigSection({ title, items = [], onAdd, onDelete }) {
   const [newValue, setNewValue] = useState('');
-
-  const handleAdd = () => {
-    if (newValue.trim()) {
-      onAdd(newValue.trim());
-      setNewValue('');
-    }
-  };
-
+  const handleAdd = () => { if(newValue.trim()) { onAdd(newValue.trim()); setNewValue(''); } };
   return (
     <div>
       <h4 className="font-bold text-gray-700 text-sm mb-3">{title}</h4>
       <div className="flex gap-2 mb-3">
-        <input 
-          type="text" 
-          value={newValue}
-          onChange={(e) => setNewValue(e.target.value)}
-          placeholder="Añadir nuevo..."
-          className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-red-500"
-          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-        />
+        <input type="text" value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Añadir nuevo..." className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-red-500" onKeyDown={(e) => e.key === 'Enter' && handleAdd()} />
         <button onClick={handleAdd} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 rounded-lg"><Plus size={16}/></button>
       </div>
       <ul className="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100 text-sm max-h-40 overflow-y-auto">
         {items.map((item, idx) => (
           <li key={idx} className="px-3 py-2 flex justify-between items-center group">
             <span className="text-gray-600">{item}</span>
-            <button onClick={() => onDelete(item)} className="text-gray-300 hover:text-red-500 transition-colors">
-              <Trash2 size={14} />
-            </button>
+            <button onClick={() => onDelete(item)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
           </li>
         ))}
         {items.length === 0 && <li className="px-3 py-2 text-gray-400 italic text-xs">Lista vacía</li>}
