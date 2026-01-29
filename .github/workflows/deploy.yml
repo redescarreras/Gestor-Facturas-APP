@@ -25,7 +25,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          # Hemos quitado la línea 'cache: npm' para evitar el error del lock file
           
       # CAMBIO IMPORTANTE: Usamos 'install' en lugar de 'ci' para evitar errores si falta el package-lock.json
       - name: Install dependencies
