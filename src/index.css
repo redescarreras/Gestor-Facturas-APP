@@ -2,8 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  body {
-    @apply bg-slate-50;
-  }
+/* Estilos globales extra si los necesitas */
+body {
+  background-color: #f3f4f6; /* Un gris muy suave de fondo */
 }
