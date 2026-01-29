@@ -3,27 +3,28 @@ import {
   LayoutGrid, FileText, Calendar, Settings, Plus, Search, Folder, 
   Calculator, TrendingUp, DollarSign, X, CheckCircle, Trash2, 
   ChevronRight, PieChart, Users, Building, MapPin, Menu, Printer,
-  Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2
+  Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
+  FolderOpen, ArrowLeft, Home, WifiOff
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
   doc, deleteDoc, query, orderBy, setDoc, getDoc 
 } from 'firebase/firestore';
-import { getAuth } from "firebase/auth";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// --- CONFIGURACIÓN FIREBASE ---
+// --- CONFIGURACIÓN FIREBASE (REAL) ---
 const firebaseConfig = {
-  // ⚠️ PON AQUÍ TUS CLAVES REALES DE LA CONSOLA DE FIREBASE
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROJECT_ID.firebaseapp.com",
-  projectId: "TU_PROJECT_ID",
-  storageBucket: "TU_PROJECT_ID.appspot.com",
-  messagingSenderId: "TU_NUMERO",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyCO_phXPPwZEgQEQlug69bvG5snSbRYZfQ",
+  authDomain: "gestor-facturas-b665a.firebaseapp.com",
+  databaseURL: "https://gestor-facturas-b665a-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "gestor-facturas-b665a",
+  storageBucket: "gestor-facturas-b665a.firebasestorage.app",
+  messagingSenderId: "178513177002",
+  appId: "1:178513177002:web:d470b0d03e5ef64bf3e3d3"
 };
 
-// Inicialización
+// Inicialización Segura
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -32,7 +33,7 @@ const auth = getAuth(app);
 const Toast = ({ message, type, show, onClose }) => {
   useEffect(() => {
     if (show) {
-      const timer = setTimeout(onClose, 4000); // 4 segundos visible
+      const timer = setTimeout(onClose, 4000);
       return () => clearTimeout(timer);
     }
   }, [show, onClose]);
@@ -42,7 +43,8 @@ const Toast = ({ message, type, show, onClose }) => {
   const bgColors = {
     success: 'bg-green-600',
     error: 'bg-red-600',
-    info: 'bg-blue-600'
+    info: 'bg-blue-600',
+    warning: 'bg-orange-500'
   };
 
   return (
@@ -50,6 +52,7 @@ const Toast = ({ message, type, show, onClose }) => {
       {type === 'info' && <Loader2 size={20} className="animate-spin" />}
       {type === 'success' && <CheckCircle size={20} />}
       {type === 'error' && <AlertCircle size={20} />}
+      {type === 'warning' && <WifiOff size={20} />}
       <span className="font-medium text-sm">{message}</span>
     </div>
   );
@@ -57,19 +60,21 @@ const Toast = ({ message, type, show, onClose }) => {
 
 // --- COMPONENTE PRINCIPAL ---
 export default function App() {
+  const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('panel');
   const [obras, setObras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Navegación Carpetas
+  const [navState, setNavState] = useState({ empresa: null, encargado: null });
+
   // Estados UI
   const [modalOpen, setModalOpen] = useState(false);
   const [editingObra, setEditingObra] = useState(null);
-  
-  // Estado de Notificación (Toast)
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
-  // Configuración dinámica
+  // Configuración
   const [config, setConfig] = useState({
     empresas: ['Elecnor', 'Magtel', 'Ezentis', 'Circet'],
     encargados: ['Juan Pérez', 'Ana García'],
@@ -92,80 +97,100 @@ export default function App() {
   };
   const [formData, setFormData] = useState(initialObraState);
 
-  // Filtros Reportes
   const [reportFilter, setReportFilter] = useState({
     empresa: 'Todas',
     encargado: 'Todos',
     mes: 'Todos'
   });
 
-  // --- CARGA DE DATOS ---
+  const showToast = (msg, type = 'success') => {
+    setNotification({ show: true, message: msg, type });
+  };
+
+  // --- AUTENTICACIÓN Y CARGA DE DATOS ---
   useEffect(() => {
+    // 1. Autenticación Anónima (Vital para poder leer/escribir en Firebase)
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        loadData(); 
+      } else {
+        signInAnonymously(auth).catch((error) => {
+          console.error("Error autenticación:", error);
+          showToast("Error de conexión con la nube", "error");
+        });
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  const loadData = () => {
+    // 2. Escuchar Obras
     const q = query(collection(db, "obras"));
     const unsubscribeObras = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
       setObras(data);
       setLoading(false);
+    }, (error) => {
+      console.error("Error Firestore:", error);
+      // Solo mostramos error si no es por permisos iniciales
+      if (error.code !== 'permission-denied') {
+         showToast("Error de sincronización.", "error");
+      }
+      setLoading(false);
     });
 
+    // 3. Escuchar Configuración
     const configRef = doc(db, "configuracion", "listas_generales");
     const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
       if (docSnap.exists()) setConfig(docSnap.data());
       else setDoc(configRef, config);
     });
-
-    return () => { unsubscribeObras(); unsubscribeConfig(); };
-  }, []);
-
-  // --- HELPER NOTIFICACIONES ---
-  const showToast = (msg, type = 'success') => {
-    setNotification({ show: true, message: msg, type });
   };
 
   // --- LÓGICA DE NEGOCIO ---
-  
   const handleSaveObra = async (e) => {
     e.preventDefault();
-    
-    // 1. Preparamos los datos
+    if (!user) { showToast("Conectando...", "info"); return; }
+
     const obraData = {
       ...formData,
       importe: parseFloat(formData.importe) || 0,
-      mes: new Date(formData.fecha).toLocaleString('es-ES', { month: 'long', year: 'numeric' })
+      mes: new Date(formData.fecha).toLocaleString('es-ES', { month: 'long', year: 'numeric' }),
+      updatedAt: new Date(),
+      updatedBy: user.uid
     };
 
-    // 2. ESTRATEGIA OPTIMISTA: Cerramos la ventana YA.
     setModalOpen(false);
     setFormData(initialObraState);
     const esEdicion = !!editingObra;
     setEditingObra(null);
 
-    // 3. Avisamos al usuario que estamos trabajando
-    showToast("Sincronizando con la nube...", "info");
+    showToast("Guardando en la nube...", "info");
 
     try {
-      // 4. Operación Async en segundo plano
       if (esEdicion) {
         await updateDoc(doc(db, "obras", editingObra.id), obraData);
       } else {
-        await addDoc(collection(db, "obras"), obraData);
+        await addDoc(collection(db, "obras"), { ...obraData, createdAt: new Date() });
       }
-      
-      // 5. Confirmación final
-      showToast(esEdicion ? "Expediente actualizado correctamente" : "¡Obra añadida con éxito!", "success");
-
+      showToast(esEdicion ? "Actualizado correctamente" : "Obra guardada y sincronizada", "success");
     } catch (error) {
       console.error(error);
-      // Si falla, avisamos (aquí podrías reabrir el modal si quisieras ser muy estricto)
-      showToast("Hubo un error al guardar en la nube", "error");
+      showToast("Error al guardar. Verifica permisos.", "error");
     }
   };
 
   const handleDelete = async (id) => {
-    if (confirm("⚠️ ¿Eliminar expediente?")) {
-      await deleteDoc(doc(db, "obras", id));
-      showToast("Expediente eliminado a la papelera", "success");
+    if (confirm("⚠️ ¿Eliminar expediente? Esta acción se sincronizará en todos los dispositivos.")) {
+      try {
+        await deleteDoc(doc(db, "obras", id));
+        showToast("Expediente eliminado", "success");
+      } catch (error) {
+        showToast("No tienes permiso para eliminar", "error");
+      }
     }
   };
 
@@ -179,26 +204,37 @@ export default function App() {
     const currentList = config[type] || [];
     let newList = [...currentList];
 
-    if (action === 'add') {
-      newList.push(value);
-    } else if (action === 'delete') {
-      newList = newList.filter(item => item !== value);
-    }
+    if (action === 'add') newList.push(value);
+    else if (action === 'delete') newList = newList.filter(item => item !== value);
 
-    // Actualización inmediata en pantalla
     setConfig(prev => ({ ...prev, [type]: newList }));
 
     try {
-      await setDoc(doc(db, "configuracion", "listas_generales"), {
-        ...config,
-        [type]: newList
-      });
+      await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList });
     } catch (error) {
-      showToast("Error al guardar configuración", 'error');
+      showToast("Error de sincronización", 'error');
     }
   };
 
-  // --- CÁLCULOS ---
+  // --- FILTROS Y CARPETAS ---
+  const treeData = useMemo(() => {
+    const tree = {};
+    obras.forEach(obra => {
+      const emp = obra.cliente || 'Sin Empresa';
+      const enc = obra.encargado || 'Sin Encargado';
+      if (!tree[emp]) tree[emp] = { totalPendiente: 0, encargados: {} };
+      if (obra.estado === 'pendiente') {
+        const importe = parseFloat(obra.importe) || 0;
+        tree[emp].totalPendiente += importe;
+        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
+        tree[emp].encargados[enc].totalPendiente += importe;
+      } else {
+        if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
+      }
+    });
+    return tree;
+  }, [obras]);
+
   const obrasFiltradas = useMemo(() => {
     return obras.filter(o => {
       const matchSearch = 
@@ -207,15 +243,23 @@ export default function App() {
         o.idObra?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         o.cliente?.toLowerCase().includes(searchQuery.toLowerCase());
       
+      if (searchQuery) return matchSearch;
+
       if (activeTab === 'reportes' || activeTab === 'cierres') {
         const matchEmpresa = reportFilter.empresa === 'Todas' || o.cliente === reportFilter.empresa;
         const matchEncargado = reportFilter.encargado === 'Todos' || o.encargado === reportFilter.encargado;
         const matchMes = reportFilter.mes === 'Todos' || o.mes === reportFilter.mes;
         return matchSearch && matchEmpresa && matchEncargado && matchMes;
       }
+
+      if (activeTab === 'panel') {
+        if (navState.empresa && o.cliente !== navState.empresa) return false;
+        if (navState.encargado && o.encargado !== navState.encargado) return false;
+        return true;
+      }
       return matchSearch;
     });
-  }, [obras, searchQuery, activeTab, reportFilter]);
+  }, [obras, searchQuery, activeTab, reportFilter, navState]);
 
   const totales = useMemo(() => {
     const base = obrasFiltradas.reduce((acc, curr) => acc + (curr.importe || 0), 0);
@@ -232,45 +276,33 @@ export default function App() {
     return { base, iva, ret, total };
   }, [formData.importe, formData.tieneRetencion]);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
+
+  // Reset al cambiar pestaña
+  useEffect(() => {
+    if (activeTab !== 'panel') {
+      setNavState({ empresa: null, encargado: null });
+      setSearchQuery('');
+    }
+  }, [activeTab]);
 
   // --- RENDER ---
   return (
     <div className="min-h-screen bg-gray-100 font-sans text-gray-900 flex flex-col md:flex-row print:bg-white">
-      
-      {/* NOTIFICACIÓN FLOTANTE */}
-      <Toast 
-        show={notification.show} 
-        message={notification.message} 
-        type={notification.type} 
-        onClose={() => setNotification({ ...notification, show: false })} 
-      />
+      <Toast show={notification.show} message={notification.message} type={notification.type} onClose={() => setNotification({ ...notification, show: false })} />
 
-      {/* ESTILOS DE IMPRESIÓN (PDF) */}
       <style>{`
         @media print {
-          /* Ocultar interfaz */
           aside, header, .no-print, .fab-button, .modal-overlay, button, .input-filter { display: none !important; }
-          
-          /* Reset layout */
           main { margin: 0 !important; padding: 20px !important; overflow: visible !important; height: auto !important; width: 100% !important; background: white !important; }
           body { background: white !important; font-size: 11px; color: black; }
-          
-          /* Mostrar Cabecera PDF */
           .print-header { display: flex !important; margin-bottom: 30px; border-bottom: 2px solid #cc0000; padding-bottom: 15px; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
-          
-          /* Tablas y Tarjetas */
           .card-resumen { border: 1px solid #ddd !important; box-shadow: none !important; margin-bottom: 15px; page-break-inside: avoid; }
           table { width: 100%; border-collapse: collapse; margin-top: 10px; }
           th, td { padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
           th { background-color: #f0f0f0 !important; font-weight: bold; color: black !important; }
           tr { page-break-inside: avoid; }
-          
-          /* Forzar colores de texto */
           .text-red-600 { color: #cc0000 !important; }
-          .text-green-600 { color: #008000 !important; }
         }
         .print-header { display: none; }
       `}</style>
@@ -294,7 +326,7 @@ export default function App() {
       {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative bg-gray-50/50 print:h-auto print:overflow-visible">
         
-        {/* CABECERA EXCLUSIVA PARA PDF/IMPRESIÓN */}
+        {/* CABECERA PDF */}
         <div className="print-header w-full">
           <div className="flex items-center gap-6">
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
@@ -304,16 +336,15 @@ export default function App() {
              </div>
           </div>
           <div className="text-right text-xs text-gray-500">
-             <p className="font-bold">Fecha de emisión:</p>
-             <p>{new Date().toLocaleDateString()}</p>
-             <p className="mt-1 text-gray-400">Generado por Gestión Cloud</p>
+             <p className="font-bold">{new Date().toLocaleDateString()}</p>
+             <p>Gestión Cloud</p>
           </div>
         </div>
 
         {/* TOP BAR */}
         <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10 no-print">
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-            {activeTab === 'panel' && <><LayoutGrid className="text-red-600"/> Gestión de Expedientes</>}
+            {activeTab === 'panel' && <><LayoutGrid className="text-red-600"/> Panel Principal</>}
             {activeTab === 'reportes' && <><FileText className="text-red-600"/> Reportes</>}
             {activeTab === 'cierres' && <><Calendar className="text-red-600"/> Cierres de Mes</>}
             {activeTab === 'ajustes' && <><Settings className="text-red-600"/> Ajustes</>}
@@ -333,83 +364,193 @@ export default function App() {
         {/* CONTENIDO */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 print:p-0">
           
-          {/* VISTA: PANEL */}
+          {/* PANEL PRINCIPAL */}
           {activeTab === 'panel' && (
             <div className="space-y-6">
+              
+              {/* BARRA SUPERIOR */}
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end no-print">
                 <div className="relative w-full md:w-96">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
                   <input 
                     type="text" 
-                    placeholder="Buscar..." 
+                    placeholder="Buscar ID, Obra, Cliente..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none shadow-sm"
                   />
                 </div>
-                <div className="flex gap-4 text-right">
-                   <div>
-                    <p className="text-xs text-gray-500 uppercase font-bold">Total Pendiente</p>
-                    <p className="text-2xl font-bold text-red-600">{totales.base.toLocaleString()} €</p>
-                   </div>
-                </div>
+                {!searchQuery && (
+                  <div className="flex-1 px-4 flex items-center text-sm text-gray-500 overflow-x-auto">
+                    <button onClick={() => setNavState({empresa: null, encargado: null})} className="flex items-center hover:text-red-600 transition-colors">
+                      <Home size={16} className="mr-1"/> Inicio
+                    </button>
+                    {navState.empresa && (
+                      <>
+                        <ChevronRight size={16} className="mx-2 text-gray-300"/>
+                        <button onClick={() => setNavState({...navState, encargado: null})} className="hover:text-red-600 transition-colors font-medium">
+                          {navState.empresa}
+                        </button>
+                      </>
+                    )}
+                    {navState.encargado && (
+                      <>
+                        <ChevronRight size={16} className="mx-2 text-gray-300"/>
+                        <span className="font-bold text-gray-800">{navState.encargado}</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden card-resumen">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
-                      <tr>
-                        <th className="px-6 py-4">ID Carreras</th>
-                        <th className="px-6 py-4">Cliente / Central</th>
-                        <th className="px-6 py-4">Obra</th>
-                        <th className="px-6 py-4">Importe</th>
-                        <th className="px-6 py-4 text-center">Estado</th>
-                        <th className="px-6 py-4 text-right no-print">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {obrasFiltradas.map(obra => (
-                        <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
-                          <td className="px-6 py-4 font-mono font-medium text-gray-500">{obra.idCarreras || "-"}</td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-gray-900">{obra.cliente}</div>
-                            <div className="text-xs text-gray-500">{obra.central}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-medium text-gray-900">{obra.nombre}</div>
-                            <div className="text-xs text-gray-500">{obra.idObra}</div>
-                            {obra.contrato && <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-600 mr-1">Ctr: {obra.contrato}</span>}
-                            {obra.tieneRetencion && <span className="text-[10px] bg-orange-100 text-orange-700 px-1 rounded font-bold">RET 5%</span>}
-                          </td>
-                          <td className="px-6 py-4 font-bold text-gray-900">
-                            {Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : 
-                              obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' :
-                              'bg-yellow-100 text-yellow-700'
-                            }`}>
-                              {obra.estado.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right no-print">
-                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
-                                <button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
-                             </div>
-                          </td>
+              {/* CONTENIDO */}
+              {(searchQuery || (navState.empresa && navState.encargado)) ? (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden card-resumen animate-in fade-in slide-in-from-bottom-2">
+                  {!searchQuery && navState.empresa && (
+                    <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setNavState({...navState, encargado: null})} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                          <ArrowLeft size={20} />
+                        </button>
+                        <div>
+                          <h3 className="font-bold text-lg text-gray-800">{navState.encargado}</h3>
+                          <p className="text-xs text-gray-500">{navState.empresa}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500 uppercase">Pendiente</p>
+                        <p className="text-xl font-bold text-red-600">{totales.base.toLocaleString()} €</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
+                        <tr>
+                          <th className="px-6 py-4">ID Carreras</th>
+                          <th className="px-6 py-4">Obra / ID</th>
+                          <th className="px-6 py-4">Importe</th>
+                          <th className="px-6 py-4 text-center">Retención</th>
+                          <th className="px-6 py-4 text-center">Estado</th>
+                          <th className="px-6 py-4 text-right no-print">Acciones</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {obrasFiltradas.map(obra => (
+                          <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
+                            <td className="px-6 py-4 font-mono font-medium text-gray-500">{obra.idCarreras || "-"}</td>
+                            <td className="px-6 py-4">
+                              <div className="font-medium text-gray-900">{obra.nombre}</div>
+                              <div className="text-xs text-gray-500">{obra.idObra}</div>
+                              {searchQuery && <div className="text-[10px] text-red-500 mt-1">{obra.cliente} - {obra.encargado}</div>}
+                            </td>
+                            <td className="px-6 py-4 font-bold text-gray-900">
+                              {Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              {obra.tieneRetencion ? <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">5%</span> : <span className="text-gray-300">-</span>}
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                                obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : 
+                                obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {obra.estado.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right no-print">
+                               <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
+                                  <button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                               </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {obrasFiltradas.length === 0 && (
+                          <tr><td colSpan="6" className="p-8 text-center text-gray-400">No se encontraron expedientes.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ) : !navState.empresa ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in">
+                  {Object.keys(treeData).length === 0 && !loading && <p className="col-span-full text-center text-gray-400 py-10">No hay obras registradas.</p>}
+                  
+                  {Object.keys(treeData).map(empresa => (
+                    <div 
+                      key={empresa} 
+                      onClick={() => setNavState({ ...navState, empresa })}
+                      className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-red-200 cursor-pointer transition-all group relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110">
+                        <Building size={80} />
+                      </div>
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="bg-red-50 p-3 rounded-xl text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
+                          <Folder size={28} strokeWidth={1.5} />
+                        </div>
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-800 mb-1">{empresa}</h3>
+                      <p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
+                      
+                      <div className="border-t border-gray-100 pt-3">
+                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente Total</p>
+                        <p className="text-xl font-bold text-red-600 group-hover:text-red-700">
+                          {treeData[empresa].totalPendiente.toLocaleString()} €
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="animate-in fade-in">
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 mb-6 flex justify-between items-center shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => setNavState({empresa: null, encargado: null})} className="p-2 hover:bg-gray-100 rounded-full">
+                        <ArrowLeft size={20} className="text-gray-600" />
+                      </button>
+                      <h2 className="text-xl font-bold text-gray-800">{navState.empresa}</h2>
+                    </div>
+                    <div className="text-right px-2">
+                      <span className="text-xs text-gray-500 uppercase font-bold">Total Pendiente Empresa</span>
+                      <p className="text-2xl font-bold text-red-600">{treeData[navState.empresa]?.totalPendiente.toLocaleString()} €</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Object.keys(treeData[navState.empresa]?.encargados || {}).map(encargado => (
+                      <div 
+                        key={encargado}
+                        onClick={() => setNavState({ ...navState, encargado })}
+                        className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group"
+                      >
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="bg-blue-50 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <Users size={24} />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-gray-800">{encargado}</h4>
+                            <p className="text-xs text-gray-500">Ver obras</p>
+                          </div>
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
+                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente</span>
+                          <span className="text-lg font-bold text-gray-900">
+                            {treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* VISTA: REPORTES Y CIERRES */}
+          {/* REPORTES, CIERRES, AJUSTES Y MODAL */}
           {(activeTab === 'reportes' || activeTab === 'cierres') && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
@@ -517,16 +658,14 @@ export default function App() {
             </div>
           )}
 
-          {/* AJUSTES */}
           {activeTab === 'ajustes' && (
             <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Settings size={18}/> Listas Desplegables</h3>
-                  <p className="text-xs text-gray-500 mt-1">Añade o elimina opciones de los menús.</p>
+                  <p className="text-xs text-gray-500 mt-1">Configura aquí las opciones que aparecen al crear una obra.</p>
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-                  {/* Listas con Input Integrado */}
                   <ConfigSection title="Empresas / Clientes" items={config.empresas} onAdd={(val) => updateConfigList('empresas', 'add', val)} onDelete={(val) => updateConfigList('empresas', 'delete', val)} />
                   <ConfigSection title="Encargados de Obra" items={config.encargados} onAdd={(val) => updateConfigList('encargados', 'add', val)} onDelete={(val) => updateConfigList('encargados', 'delete', val)} />
                   <ConfigSection title="Centrales / Zonas" items={config.centrales} onAdd={(val) => updateConfigList('centrales', 'add', val)} onDelete={(val) => updateConfigList('centrales', 'delete', val)} />
@@ -547,6 +686,7 @@ export default function App() {
             </div>
             
             <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Sección 1 */}
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="ID Carreras">
                   <input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" />
@@ -559,6 +699,7 @@ export default function App() {
                 </InputGroup>
               </div>
 
+              {/* Sección 2 */}
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="Nombre Obra">
                   <textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
@@ -577,6 +718,7 @@ export default function App() {
                 </InputGroup>
               </div>
 
+              {/* Sección 3 */}
               <div className="space-y-4 md:col-span-1">
                 <InputGroup label="Fecha">
                    <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
