@@ -78,7 +78,8 @@ export default function App() {
   const [config, setConfig] = useState({
     empresas: ['Elecnor', 'Magtel', 'Ezentis', 'Circet'],
     encargados: ['Juan Pérez', 'Ana García'],
-    centrales: ['Madrid Centro', 'Sevilla Norte', 'Valencia Puerto']
+    centrales: ['Madrid Centro', 'Sevilla Norte', 'Valencia Puerto'],
+    contratos: ['Marco 2024', 'Anexo 1'] // Nuevo campo en config
   });
 
   const initialObraState = {
@@ -90,10 +91,12 @@ export default function App() {
     encargado: '',
     importe: '',
     fecha: new Date().toISOString().split('T')[0],
-    tieneRetencion: false, // Ahora se usa para "tienePlus"
+    tieneRetencion: false,
     contrato: '',
     numFactura: '',
-    estado: 'pendiente'
+    estado: 'pendiente',
+    observaciones: '', // Nuevo campo
+    uuii: '' // Nuevo campo (Viviendas)
   };
   const [formData, setFormData] = useState(initialObraState);
 
@@ -105,8 +108,8 @@ export default function App() {
 
   // Filtros Cierre Flexible
   const [closingRange, setClosingRange] = useState({
-    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0], // Primer día del mes
-    end: new Date().toISOString().split('T')[0] // Hoy
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
   });
 
   const showToast = (msg, type = 'success') => {
@@ -274,7 +277,6 @@ export default function App() {
       }
 
       if (activeTab === 'cierres') {
-        // FILTRO POR RANGO DE FECHAS PERSONALIZADO
         if (!closingRange.start || !closingRange.end) return true;
         return o.fecha >= closingRange.start && o.fecha <= closingRange.end;
       }
@@ -288,19 +290,21 @@ export default function App() {
     });
   }, [obras, searchQuery, activeTab, reportFilter, navState, closingRange]);
 
-  // Totales Genéricos (Se calculan sobre lo filtrado)
+  // Totales Genéricos
   const totales = useMemo(() => {
     const base = obrasFiltradas.reduce((acc, curr) => acc + (parseFloat(curr.importe) || 0), 0);
     const iva = base * 0.21;
     const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
-    // TOTAL CON IVA
-    const totalConIva = base + iva + plus;
-    // TOTAL SIN IVA (Para Panel)
-    const totalSinIva = base + plus;
-    return { base, iva, plus, totalConIva, totalSinIva };
+    
+    // Cálculo UUII global
+    const uuii = obrasFiltradas.reduce((acc, curr) => acc + ((parseFloat(curr.uuii) || 0) * 1.50), 0);
+
+    const totalConIva = base + iva + plus + uuii;
+    const totalSinIva = base + plus + uuii;
+    return { base, iva, plus, uuii, totalConIva, totalSinIva };
   }, [obrasFiltradas]);
 
-  // Totales para Carpetas (Solo pendientes, y SIN IVA según petición)
+  // Totales para Carpetas
   const treeData = useMemo(() => {
     const tree = {};
     obras.forEach(obra => {
@@ -312,8 +316,9 @@ export default function App() {
       if (obra.estado === 'pendiente') {
         const base = parseFloat(obra.importe) || 0;
         const plus = obra.tieneRetencion ? base * 0.05 : 0;
-        // Petición: Total Pendiente = Base + Plus (SIN IVA)
-        const totalObra = base + plus;
+        const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
+        
+        const totalObra = base + plus + uuiiVal;
 
         tree[emp].totalPendiente += totalObra;
         if (!tree[emp].encargados[enc]) tree[emp].encargados[enc] = { totalPendiente: 0 };
@@ -325,14 +330,16 @@ export default function App() {
     return tree;
   }, [obras]);
 
-  // Cálculos en vivo para el Formulario (SIN IVA en el Total principal)
+  // Cálculos en vivo para el Formulario
   const formCalculos = useMemo(() => {
     const base = parseFloat(formData.importe) || 0;
     const iva = base * 0.21;
     const plus = formData.tieneRetencion ? base * 0.05 : 0;
-    const totalSinIva = base + plus; 
-    return { base, iva, plus, totalSinIva };
-  }, [formData.importe, formData.tieneRetencion]);
+    const uuiiVal = (parseFloat(formData.uuii) || 0) * 1.50;
+    
+    const totalSinIva = base + plus + uuiiVal; 
+    return { base, iva, plus, uuiiVal, totalSinIva };
+  }, [formData.importe, formData.tieneRetencion, formData.uuii]);
 
   const handlePrint = () => window.print();
 
@@ -662,10 +669,13 @@ export default function App() {
                 <div className="space-y-4">
                   {Object.entries(obrasFiltradas.reduce((acc, obra) => {
                       const key = obra.cliente;
-                      if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, count: 0 };
+                      if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, uuii: 0, count: 0 };
                       const importe = parseFloat(obra.importe) || 0;
+                      const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
+                      
                       acc[key].base += importe;
                       acc[key].iva += importe * 0.21;
+                      acc[key].uuii += uuiiVal;
                       if(obra.tieneRetencion) acc[key].plus += importe * 0.05;
                       acc[key].count += 1;
                       return acc;
@@ -679,7 +689,8 @@ export default function App() {
                         <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
                         <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
                         <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
-                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus).toLocaleString()} €</p></div>
+                        {data.uuii > 0 && <div className="w-20"><p className="text-gray-400 text-xs">UUII</p><p className="font-medium text-purple-600">{data.uuii.toLocaleString()} €</p></div>}
+                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus + data.uuii).toLocaleString()} €</p></div>
                       </div>
                     </div>
                   ))}
@@ -773,10 +784,11 @@ export default function App() {
                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Settings size={18}/> Listas Desplegables</h3>
                   <p className="text-xs text-gray-500 mt-1">Configura aquí las opciones que aparecen al crear una obra.</p>
                 </div>
-                <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
                   <ConfigSection title="Empresas / Clientes" items={config.empresas} onAdd={(val) => updateConfigList('empresas', 'add', val)} onDelete={(val) => updateConfigList('empresas', 'delete', val)} />
                   <ConfigSection title="Encargados de Obra" items={config.encargados} onAdd={(val) => updateConfigList('encargados', 'add', val)} onDelete={(val) => updateConfigList('encargados', 'delete', val)} />
                   <ConfigSection title="Centrales / Zonas" items={config.centrales} onAdd={(val) => updateConfigList('centrales', 'add', val)} onDelete={(val) => updateConfigList('centrales', 'delete', val)} />
+                  <ConfigSection title="Nº Contratos" items={config.contratos} onAdd={(val) => updateConfigList('contratos', 'add', val)} onDelete={(val) => updateConfigList('contratos', 'delete', val)} />
                 </div>
               </div>
             </div>
@@ -802,7 +814,10 @@ export default function App() {
                   <input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" />
                 </InputGroup>
                 <InputGroup label="Nº Contrato">
-                   <input className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})} />
+                   <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
+                     <option value="">Seleccionar...</option>
+                     {config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}
+                   </select>
                 </InputGroup>
               </div>
 
@@ -831,12 +846,25 @@ export default function App() {
                 <InputGroup label="Base Imponible (€)">
                    <input type="number" step="0.01" required className="input-field font-bold text-lg" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} />
                 </InputGroup>
-                <InputGroup label="Encargado">
-                   <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
-                     <option value="">Seleccionar...</option>
-                     {config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}
-                   </select>
-                </InputGroup>
+                
+                {/* CAMPO UUII (Viviendas) */}
+                <div className="grid grid-cols-2 gap-2">
+                  <InputGroup label="Encargado">
+                     <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
+                       <option value="">Seleccionar...</option>
+                       {config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}
+                     </select>
+                  </InputGroup>
+                  <InputGroup label="UUII (Viviendas)">
+                     <input 
+                        type="number" 
+                        className="input-field border-blue-200 bg-blue-50 text-blue-800 font-medium" 
+                        value={formData.uuii} 
+                        onChange={e => setFormData({...formData, uuii: e.target.value})} 
+                        placeholder="Nº..." 
+                     />
+                  </InputGroup>
+                </div>
                 
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2 shadow-inner">
                    <label className="flex items-center gap-2 cursor-pointer mb-3">
@@ -844,18 +872,24 @@ export default function App() {
                      <span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span>
                    </label>
                    
-                   {/* DESGLOSE EN VIVO - SOLO BASE + PLUS (SIN IVA AQUI) */}
+                   {/* DESGLOSE EN VIVO */}
                    <div className="space-y-2 text-xs text-gray-600 border-t border-gray-200 pt-2">
                       <div className="flex justify-between">
                         <span>Base:</span> 
                         <span className="font-medium">{formCalculos.base.toFixed(2)} €</span>
                       </div>
-                      {/* IVA OCULTO EN ESTA FASE POR PETICIÓN USUARIO */}
                       
                       {formData.tieneRetencion && (
                         <div className="flex justify-between text-blue-600">
                           <span>+ Plus (5%):</span> 
                           <span className="font-medium">+{formCalculos.plus.toFixed(2)} €</span>
+                        </div>
+                      )}
+
+                      {formCalculos.uuiiVal > 0 && (
+                        <div className="flex justify-between text-purple-600">
+                          <span>+ Viviendas ({formData.uuii}):</span> 
+                          <span className="font-medium">+{formCalculos.uuiiVal.toFixed(2)} €</span>
                         </div>
                       )}
                       
@@ -872,6 +906,19 @@ export default function App() {
                       <button type="button" key={st} onClick={() => setFormData({...formData, estado: st})} className={`flex-1 py-1 text-xs font-bold rounded capitalize ${formData.estado === st ? 'bg-white text-red-600 shadow-sm' : 'text-gray-400'}`}>{st}</button>
                     ))}
                 </div>
+              </div>
+
+              {/* CAMPO OBSERVACIONES */}
+              <div className="md:col-span-3">
+                <InputGroup label="Observaciones (Opcional)">
+                  <textarea 
+                    rows={2} 
+                    className="input-field resize-none" 
+                    value={formData.observaciones} 
+                    onChange={e => setFormData({...formData, observaciones: e.target.value})} 
+                    placeholder="Notas adicionales..." 
+                  />
+                </InputGroup>
               </div>
 
               <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3">
