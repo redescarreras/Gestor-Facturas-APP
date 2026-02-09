@@ -79,7 +79,7 @@ export default function App() {
     empresas: ['Elecnor', 'Magtel', 'Ezentis', 'Circet'],
     encargados: ['Juan Pérez', 'Ana García'],
     centrales: ['Madrid Centro', 'Sevilla Norte', 'Valencia Puerto'],
-    contratos: ['Marco 2024', 'Anexo 1'] // Nuevo campo en config
+    contratos: ['Marco 2024', 'Anexo 1']
   });
 
   const initialObraState = {
@@ -95,8 +95,8 @@ export default function App() {
     contrato: '',
     numFactura: '',
     estado: 'pendiente',
-    observaciones: '', // Nuevo campo
-    uuii: '' // Nuevo campo (Viviendas)
+    observaciones: '',
+    uuii: ''
   };
   const [formData, setFormData] = useState(initialObraState);
 
@@ -105,6 +105,9 @@ export default function App() {
     empresa: 'Todas',
     encargado: 'Todos'
   });
+
+  // Variable para saber si estamos en modo "Reporte de Encargado"
+  const isEncargadoFilter = reportFilter.encargado !== 'Todos';
 
   // Filtros Cierre Flexible
   const [closingRange, setClosingRange] = useState({
@@ -290,21 +293,18 @@ export default function App() {
     });
   }, [obras, searchQuery, activeTab, reportFilter, navState, closingRange]);
 
-  // Totales Genéricos
   const totales = useMemo(() => {
     const base = obrasFiltradas.reduce((acc, curr) => acc + (parseFloat(curr.importe) || 0), 0);
     const iva = base * 0.21;
     const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
-    
-    // Cálculo UUII global
     const uuii = obrasFiltradas.reduce((acc, curr) => acc + ((parseFloat(curr.uuii) || 0) * 1.50), 0);
 
     const totalConIva = base + iva + plus + uuii;
+    // Total sin IVA (para panel, carpetas y reportes de encargado)
     const totalSinIva = base + plus + uuii;
     return { base, iva, plus, uuii, totalConIva, totalSinIva };
   }, [obrasFiltradas]);
 
-  // Totales para Carpetas
   const treeData = useMemo(() => {
     const tree = {};
     obras.forEach(obra => {
@@ -330,7 +330,6 @@ export default function App() {
     return tree;
   }, [obras]);
 
-  // Cálculos en vivo para el Formulario
   const formCalculos = useMemo(() => {
     const base = parseFloat(formData.importe) || 0;
     const iva = base * 0.21;
@@ -343,7 +342,6 @@ export default function App() {
 
   const handlePrint = () => window.print();
 
-  // Reset al cambiar pestaña
   useEffect(() => {
     if (activeTab !== 'panel') {
       setNavState({ empresa: null, encargado: null });
@@ -438,33 +436,13 @@ export default function App() {
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end no-print">
                 <div className="relative w-full md:w-96">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-                  <input 
-                    type="text" 
-                    placeholder="Buscar ID, Obra, Cliente..." 
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none shadow-sm"
-                  />
+                  <input type="text" placeholder="Buscar ID, Obra, Cliente..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none shadow-sm" />
                 </div>
                 {!searchQuery && (
                   <div className="flex-1 px-4 flex items-center text-sm text-gray-500 overflow-x-auto">
-                    <button onClick={() => setNavState({empresa: null, encargado: null})} className="flex items-center hover:text-red-600 transition-colors">
-                      <Home size={16} className="mr-1"/> Inicio
-                    </button>
-                    {navState.empresa && (
-                      <>
-                        <ChevronRight size={16} className="mx-2 text-gray-300"/>
-                        <button onClick={() => setNavState({...navState, encargado: null})} className="hover:text-red-600 transition-colors font-medium">
-                          {navState.empresa}
-                        </button>
-                      </>
-                    )}
-                    {navState.encargado && (
-                      <>
-                        <ChevronRight size={16} className="mx-2 text-gray-300"/>
-                        <span className="font-bold text-gray-800">{navState.encargado}</span>
-                      </>
-                    )}
+                    <button onClick={() => setNavState({empresa: null, encargado: null})} className="flex items-center hover:text-red-600 transition-colors"><Home size={16} className="mr-1"/> Inicio</button>
+                    {navState.empresa && <><ChevronRight size={16} className="mx-2 text-gray-300"/><button onClick={() => setNavState({...navState, encargado: null})} className="hover:text-red-600 transition-colors font-medium">{navState.empresa}</button></>}
+                    {navState.encargado && <><ChevronRight size={16} className="mx-2 text-gray-300"/><span className="font-bold text-gray-800">{navState.encargado}</span></>}
                   </div>
                 )}
               </div>
@@ -474,66 +452,36 @@ export default function App() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden card-resumen animate-in fade-in slide-in-from-bottom-2">
                   {!searchQuery && navState.empresa && (
                     <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => setNavState({...navState, encargado: null})} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                          <ArrowLeft size={20} />
-                        </button>
-                        <div>
-                          <h3 className="font-bold text-lg text-gray-800">{navState.encargado}</h3>
-                          <p className="text-xs text-gray-500">{navState.empresa}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500 uppercase">Pendiente (Sin IVA)</p>
-                        <p className="text-xl font-bold text-red-600">{totales.totalSinIva.toLocaleString()} €</p>
-                      </div>
+                      <div className="flex items-center gap-3"><button onClick={() => setNavState({...navState, encargado: null})} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><ArrowLeft size={20} /></button><div><h3 className="font-bold text-lg text-gray-800">{navState.encargado}</h3><p className="text-xs text-gray-500">{navState.empresa}</p></div></div>
+                      <div className="text-right"><p className="text-xs text-gray-500 uppercase">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600">{totales.totalSinIva.toLocaleString()} €</p></div>
                     </div>
                   )}
-
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                       <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
-                        <tr>
-                          <th className="px-6 py-4">ID Carreras</th>
-                          <th className="px-6 py-4">Obra / ID</th>
-                          <th className="px-6 py-4">Importe Base</th>
-                          <th className="px-6 py-4 text-center">Plus 5%</th>
-                          <th className="px-6 py-4 text-center">Estado</th>
-                          <th className="px-6 py-4 text-right no-print">Acciones</th>
-                        </tr>
+                        <tr><th className="px-6 py-4">ID Carreras</th><th className="px-6 py-4">Obra / ID</th><th className="px-6 py-4">Importe Base</th><th className="px-6 py-4 text-center">Total 5% Incl.</th><th className="px-6 py-4 text-center">Estado</th><th className="px-6 py-4 text-right no-print">Acciones</th></tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {obrasFiltradas.map(obra => (
+                        {obrasFiltradas.map(obra => {
+                          const base = parseFloat(obra.importe) || 0;
+                          const totalConPlus = base + (obra.tieneRetencion ? base * 0.05 : 0);
+                          const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
+                          // El total que se muestra en la tabla es Base + Plus (Sin UUII aqui según v17, o con? El usuario pidio "Total 5% Incl")
+                          // Vamos a mostrar Base + Plus como pidió especificamente.
+                          
+                          return (
                           <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
                             <td className="px-6 py-4 font-mono font-medium text-gray-500">{obra.idCarreras || "-"}</td>
-                            <td className="px-6 py-4">
-                              <div className="font-medium text-gray-900">{obra.nombre}</div>
-                              <div className="text-xs text-gray-500">{obra.idObra}</div>
-                              {searchQuery && <div className="text-[10px] text-red-500 mt-1">{obra.cliente} - {obra.encargado}</div>}
+                            <td className="px-6 py-4"><div className="font-medium text-gray-900">{obra.nombre}</div><div className="text-xs text-gray-500">{obra.idObra}</div>{searchQuery && <div className="text-[10px] text-red-500 mt-1">{obra.cliente} - {obra.encargado}</div>}</td>
+                            <td className="px-6 py-4 font-bold text-gray-900">{Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                            <td className="px-6 py-4 text-center font-bold text-blue-800">
+                              {/* Mostrar importe Total con 5% */}
+                              {totalConPlus.toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                             </td>
-                            <td className="px-6 py-4 font-bold text-gray-900">
-                              {Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              {obra.tieneRetencion ? <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">+5%</span> : <span className="text-gray-300">-</span>}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                                obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : 
-                                obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' :
-                                'bg-yellow-100 text-yellow-700'
-                              }`}>
-                                {obra.estado.toUpperCase()}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right no-print">
-                               <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
-                                  <button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
-                               </div>
-                            </td>
+                            <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-full text-xs font-bold ${obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{obra.estado.toUpperCase()}</span></td>
+                            <td className="px-6 py-4 text-right no-print"><div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button><button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button></div></td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -541,70 +489,26 @@ export default function App() {
               ) : !navState.empresa ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in">
                   {Object.keys(treeData).length === 0 && !loading && <p className="col-span-full text-center text-gray-400 py-10">No hay obras registradas.</p>}
-                  
                   {Object.keys(treeData).map(empresa => (
-                    <div 
-                      key={empresa} 
-                      onClick={() => setNavState({ ...navState, empresa })}
-                      className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-red-200 cursor-pointer transition-all group relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110">
-                        <Building size={80} />
-                      </div>
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="bg-red-50 p-3 rounded-xl text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                          <Folder size={28} strokeWidth={1.5} />
-                        </div>
-                      </div>
-                      <h3 className="text-lg font-bold text-gray-800 mb-1">{empresa}</h3>
-                      <p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
-                      
-                      <div className="border-t border-gray-100 pt-3">
-                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Sin IVA)</p>
-                        <p className="text-xl font-bold text-red-600 group-hover:text-red-700">
-                          {treeData[empresa].totalPendiente.toLocaleString()} €
-                        </p>
-                      </div>
+                    <div key={empresa} onClick={() => setNavState({ ...navState, empresa })} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-red-200 cursor-pointer transition-all group relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110"><Building size={80} /></div>
+                      <div className="flex items-start justify-between mb-4"><div className="bg-red-50 p-3 rounded-xl text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors"><Folder size={28} strokeWidth={1.5} /></div></div>
+                      <h3 className="text-lg font-bold text-gray-800 mb-1">{empresa}</h3><p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
+                      <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600 group-hover:text-red-700">{treeData[empresa].totalPendiente.toLocaleString()} €</p></div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="animate-in fade-in">
                   <div className="bg-white p-4 rounded-xl border border-gray-200 mb-6 flex justify-between items-center shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => setNavState({empresa: null, encargado: null})} className="p-2 hover:bg-gray-100 rounded-full">
-                        <ArrowLeft size={20} className="text-gray-600" />
-                      </button>
-                      <h2 className="text-xl font-bold text-gray-800">{navState.empresa}</h2>
-                    </div>
-                    <div className="text-right px-2">
-                      <span className="text-xs text-gray-500 uppercase font-bold">Total Pendiente Empresa</span>
-                      <p className="text-2xl font-bold text-red-600">{treeData[navState.empresa]?.totalPendiente.toLocaleString()} €</p>
-                    </div>
+                    <div className="flex items-center gap-3"><button onClick={() => setNavState({empresa: null, encargado: null})} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft size={20} className="text-gray-600" /></button><h2 className="text-xl font-bold text-gray-800">{navState.empresa}</h2></div>
+                    <div className="text-right px-2"><span className="text-xs text-gray-500 uppercase font-bold">Total Pendiente Empresa</span><p className="text-2xl font-bold text-red-600">{treeData[navState.empresa]?.totalPendiente.toLocaleString()} €</p></div>
                   </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {Object.keys(treeData[navState.empresa]?.encargados || {}).map(encargado => (
-                      <div 
-                        key={encargado}
-                        onClick={() => setNavState({ ...navState, encargado })}
-                        className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group"
-                      >
-                        <div className="flex items-center gap-4 mb-4">
-                          <div className="bg-blue-50 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                            <Users size={24} />
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-gray-800">{encargado}</h4>
-                            <p className="text-xs text-gray-500">Ver obras</p>
-                          </div>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
-                          <span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span>
-                          <span className="text-lg font-bold text-gray-900">
-                            {treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €
-                          </span>
-                        </div>
+                      <div key={encargado} onClick={() => setNavState({ ...navState, encargado })} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group">
+                        <div className="flex items-center gap-4 mb-4"><div className="bg-blue-50 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Users size={24} /></div><div><h4 className="font-bold text-gray-800">{encargado}</h4><p className="text-xs text-gray-500">Ver obras</p></div></div>
+                        <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span><span className="text-lg font-bold text-gray-900">{treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €</span></div>
                       </div>
                     ))}
                   </div>
@@ -617,53 +521,38 @@ export default function App() {
           {(activeTab === 'reportes' || activeTab === 'cierres') && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
-                <div className="flex items-center gap-2 text-gray-500 font-bold text-sm mr-2">
-                  <Filter size={18} /> FILTRAR:
-                </div>
-                
+                <div className="flex items-center gap-2 text-gray-500 font-bold text-sm mr-2"><Filter size={18} /> FILTRAR:</div>
                 {activeTab === 'reportes' && (
                   <>
-                    <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}>
-                      <option value="Todas">Todas las Empresas</option>
-                      {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
-                    <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}>
-                      <option value="Todos">Todos los Encargados</option>
-                      {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
+                    <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas las Empresas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                    <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                   </>
                 )}
-
                 {activeTab === 'cierres' && (
                   <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
-                    <span className="text-xs font-bold text-gray-500 pl-2">Desde:</span>
-                    <input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.start} onChange={e => setClosingRange({...closingRange, start: e.target.value})} />
-                    <span className="text-xs font-bold text-gray-500">Hasta:</span>
-                    <input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.end} onChange={e => setClosingRange({...closingRange, end: e.target.value})} />
+                    <span className="text-xs font-bold text-gray-500 pl-2">Desde:</span><input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.start} onChange={e => setClosingRange({...closingRange, start: e.target.value})} />
+                    <span className="text-xs font-bold text-gray-500">Hasta:</span><input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.end} onChange={e => setClosingRange({...closingRange, end: e.target.value})} />
                   </div>
                 )}
-
-                <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg">
-                  <Download size={16} /> Imprimir / PDF
-                </button>
+                <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg"><Download size={16} /> Imprimir / PDF</button>
               </div>
 
-              {activeTab === 'cierres' && (
-                <div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end">
-                  <h3 className="text-xl font-bold uppercase text-gray-800">Cierre del Periodo</h3>
-                  <p className="text-sm font-medium text-gray-500">{new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p>
-                </div>
-              )}
+              {activeTab === 'cierres' && (<div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end"><h3 className="text-xl font-bold uppercase text-gray-800">Cierre del Periodo</h3><p className="text-sm font-medium text-gray-500">{new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p></div>)}
 
-              {/* TARJETAS RESUMEN (SIEMPRE MUESTRAN TODO) */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* TARJETAS SUPERIORES */}
+              <div className={`grid grid-cols-2 ${isEncargadoFilter ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4`}>
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
-                <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />
+                {/* Ocultar IVA si es filtro de encargado */}
+                {!isEncargadoFilter && <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />}
                 <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
-                <ReportCard title="TOTAL FACTURACIÓN" amount={totales.totalConIva} color="text-red-600" isBold />
+                <ReportCard 
+                  title="TOTAL FACTURACIÓN" 
+                  // Si es encargado, mostramos total sin IVA (Base+Plus+UUII), si no, con IVA
+                  amount={isEncargadoFilter ? totales.totalSinIva : totales.totalConIva} 
+                  color="text-red-600" isBold 
+                />
               </div>
 
-              {/* DESGLOSE POR EMPRESA (TABLA 1) */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen">
                 <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Desglose por Empresa</h3>
                 <div className="space-y-4">
@@ -672,7 +561,6 @@ export default function App() {
                       if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, uuii: 0, count: 0 };
                       const importe = parseFloat(obra.importe) || 0;
                       const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
-                      
                       acc[key].base += importe;
                       acc[key].iva += importe * 0.21;
                       acc[key].uuii += uuiiVal;
@@ -681,71 +569,102 @@ export default function App() {
                       return acc;
                   }, {})).map(([group, data]) => (
                     <div key={group} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-100 transition-all">
-                      <div className="mb-2 sm:mb-0 w-1/4">
-                        <p className="font-bold text-gray-900">{group}</p>
-                        <p className="text-xs text-gray-500">{data.count} expedientes</p>
-                      </div>
+                      <div className="mb-2 sm:mb-0 w-1/4"><p className="font-bold text-gray-900">{group}</p><p className="text-xs text-gray-500">{data.count} expedientes</p></div>
                       <div className="text-right flex-1 flex justify-end gap-6 text-sm">
                         <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
-                        <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
+                        
+                        {/* Ocultar Columna IVA si es encargado */}
+                        {!isEncargadoFilter && (
+                          <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
+                        )}
+                        
                         <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
                         {data.uuii > 0 && <div className="w-20"><p className="text-gray-400 text-xs">UUII</p><p className="font-medium text-purple-600">{data.uuii.toLocaleString()} €</p></div>}
-                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus + data.uuii).toLocaleString()} €</p></div>
+                        
+                        <div className="w-24">
+                          <p className="text-gray-400 text-xs font-bold">Total</p>
+                          <p className="font-bold text-green-700 text-lg">
+                            {/* Total condicional: Sin IVA si es encargado */}
+                            {(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + data.uuii).toLocaleString()} €
+                          </p>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* DESGLOSE POR ENCARGADO (TABLA 2 - Solo en Cierres para no saturar Reportes) */}
-              {activeTab === 'cierres' && (
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen break-page">
-                  <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Producción por Encargado</h3>
-                  <div className="space-y-4">
-                    {Object.entries(obrasFiltradas.reduce((acc, obra) => {
-                        const key = obra.encargado;
-                        if (!acc[key]) acc[key] = { base: 0, count: 0 };
-                        const importe = parseFloat(obra.importe) || 0;
-                        acc[key].base += importe;
-                        acc[key].count += 1;
-                        return acc;
-                    }, {})).map(([encargado, data]) => (
-                      <div key={encargado} className="flex justify-between items-center p-2 border-b border-gray-50 last:border-0">
-                        <span className="font-medium text-gray-700">{encargado}</span>
-                        <div className="text-right">
-                          <span className="text-sm font-bold block">{data.base.toLocaleString()} € (Base)</span>
-                          <span className="text-xs text-gray-400">{data.count} obras</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              {/* LISTA DETALLADA PARA REPORTES (NUEVO) */}
+              {activeTab === 'reportes' && (
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
+                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Expedientes</h3>
+                   <table className="w-full text-xs text-left">
+                     <thead>
+                       <tr className="border-b bg-gray-50">
+                         <th className="py-2 px-2">Fecha</th>
+                         <th className="py-2 px-2">ID</th>
+                         <th className="py-2 px-2">Central</th>
+                         <th className="py-2 px-2">Obra</th>
+                         <th className="py-2 px-2">Observaciones</th>
+                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {obrasFiltradas.map(o => {
+                         const base = parseFloat(o.importe) || 0;
+                         const plus = o.tieneRetencion ? base * 0.05 : 0;
+                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
+                         // Total en detalle: Base + Plus + UUII (Sin IVA)
+                         const totalFila = base + plus + uuiiVal;
+                         return (
+                           <tr key={o.id} className="border-b border-gray-50">
+                             <td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td>
+                             <td className="py-1 px-2 font-mono">{o.idCarreras}</td>
+                             <td className="py-1 px-2">{o.central}</td>
+                             <td className="py-1 px-2">{o.nombre}</td>
+                             <td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td>
+                             <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString()} €</td>
+                           </tr>
+                         )
+                       })}
+                     </tbody>
+                   </table>
                 </div>
               )}
 
-              {/* LISTA DETALLADA */}
+              {/* LISTA DETALLADA PARA CIERRES */}
               {activeTab === 'cierres' && (
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6">
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
                    <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Obras</h3>
                    <table className="w-full text-xs text-left">
                      <thead>
                        <tr className="border-b bg-gray-50">
                          <th className="py-2 px-2">Fecha</th>
                          <th className="py-2 px-2">ID</th>
-                         <th className="py-2 px-2">Cliente</th>
+                         <th className="py-2 px-2">Central</th>
                          <th className="py-2 px-2">Obra</th>
-                         <th className="py-2 px-2 text-right">Base</th>
+                         <th className="py-2 px-2">Observaciones</th>
+                         {/* CAMBIO: Base -> Total 5% Incl. */}
+                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
                        </tr>
                      </thead>
                      <tbody>
-                       {obrasFiltradas.map(o => (
+                       {obrasFiltradas.map(o => {
+                         const base = parseFloat(o.importe) || 0;
+                         const plus = o.tieneRetencion ? base * 0.05 : 0;
+                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
+                         const totalFila = base + plus + uuiiVal;
+                         return (
                          <tr key={o.id} className="border-b border-gray-50">
                            <td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td>
                            <td className="py-1 px-2 font-mono">{o.idCarreras}</td>
-                           <td className="py-1 px-2">{o.cliente}</td>
+                           <td className="py-1 px-2">{o.central}</td>
                            <td className="py-1 px-2">{o.nombre}</td>
-                           <td className="py-1 px-2 text-right font-medium">{Number(o.importe).toLocaleString()} €</td>
+                           <td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td>
+                           {/* CAMBIO: Mostrar Importe + Plus + UUII */}
+                           <td className="py-1 px-2 text-right font-medium">{totalFila.toLocaleString()} €</td>
                          </tr>
-                       ))}
+                       )})}
                      </tbody>
                    </table>
                 </div>
@@ -761,24 +680,10 @@ export default function App() {
                   <p className="text-xs text-blue-600 mt-1">Exporta tus datos para guardarlos en tu ordenador o importa una copia anterior.</p>
                 </div>
                 <div className="p-6 flex flex-col md:flex-row gap-6 items-center">
-                  <div className="flex-1 w-full">
-                    <button onClick={handleExportBackup} className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group">
-                      <Download size={32} className="text-gray-400 group-hover:text-blue-600 mb-2"/>
-                      <span className="font-bold text-gray-700 group-hover:text-blue-700">Exportar Datos</span>
-                      <span className="text-xs text-gray-400 mt-1">Descargar archivo .JSON</span>
-                    </button>
-                  </div>
-                  <div className="flex-1 w-full relative">
-                    <input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                    <div className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group">
-                      <Upload size={32} className="text-gray-400 group-hover:text-green-600 mb-2"/>
-                      <span className="font-bold text-gray-700 group-hover:text-green-700">Importar Datos</span>
-                      <span className="text-xs text-gray-400 mt-1">Subir archivo .JSON</span>
-                    </div>
-                  </div>
+                  <div className="flex-1 w-full"><button onClick={handleExportBackup} className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"><Download size={32} className="text-gray-400 group-hover:text-blue-600 mb-2"/><span className="font-bold text-gray-700 group-hover:text-blue-700">Exportar Datos</span><span className="text-xs text-gray-400 mt-1">Descargar archivo .JSON</span></button></div>
+                  <div className="flex-1 w-full relative"><input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" /><div className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group"><Upload size={32} className="text-gray-400 group-hover:text-green-600 mb-2"/><span className="font-bold text-gray-700 group-hover:text-green-700">Importar Datos</span><span className="text-xs text-gray-400 mt-1">Subir archivo .JSON</span></div></div>
                 </div>
               </div>
-
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Settings size={18}/> Listas Desplegables</h3>
@@ -807,129 +712,38 @@ export default function App() {
             
             <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
-                <InputGroup label="ID Carreras">
-                  <input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" />
-                </InputGroup>
-                <InputGroup label="ID Obra (Cliente)">
-                  <input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" />
-                </InputGroup>
-                <InputGroup label="Nº Contrato">
-                   <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
-                     <option value="">Seleccionar...</option>
-                     {config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}
-                   </select>
-                </InputGroup>
+                <InputGroup label="ID Carreras"><input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" /></InputGroup>
+                <InputGroup label="ID Obra (Cliente)"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" /></InputGroup>
+                <InputGroup label="Nº Contrato"><select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}><option value="">Seleccionar...</option>{config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
               </div>
-
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
-                <InputGroup label="Nombre Obra">
-                  <textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
-                </InputGroup>
-                <InputGroup label="Cliente">
-                   <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
-                     <option value="">Seleccionar...</option>
-                     {config.empresas?.map(op => <option key={op} value={op}>{op}</option>)}
-                   </select>
-                </InputGroup>
-                <InputGroup label="Zona / Central">
-                   <select required className="input-field" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})}>
-                     <option value="">Seleccionar...</option>
-                     {config.centrales?.map(op => <option key={op} value={op}>{op}</option>)}
-                   </select>
-                </InputGroup>
+                <InputGroup label="Nombre Obra"><textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
+                <InputGroup label="Cliente"><select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}><option value="">Seleccionar...</option>{config.empresas?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
+                <InputGroup label="Zona / Central"><select required className="input-field" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})}><option value="">Seleccionar...</option>{config.centrales?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
               </div>
-
               <div className="space-y-4 md:col-span-1">
-                <InputGroup label="Fecha">
-                   <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
-                </InputGroup>
-                <InputGroup label="Base Imponible (€)">
-                   <input type="number" step="0.01" required className="input-field font-bold text-lg" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} />
-                </InputGroup>
-                
-                {/* CAMPO UUII (Viviendas) */}
+                <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
+                <InputGroup label="Base Imponible (€)"><input type="number" step="0.01" required className="input-field font-bold text-lg" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} /></InputGroup>
                 <div className="grid grid-cols-2 gap-2">
-                  <InputGroup label="Encargado">
-                     <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
-                       <option value="">Seleccionar...</option>
-                       {config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}
-                     </select>
-                  </InputGroup>
-                  <InputGroup label="UUII (Viviendas)">
-                     <input 
-                        type="number" 
-                        className="input-field border-blue-200 bg-blue-50 text-blue-800 font-medium" 
-                        value={formData.uuii} 
-                        onChange={e => setFormData({...formData, uuii: e.target.value})} 
-                        placeholder="Nº..." 
-                     />
-                  </InputGroup>
+                  <InputGroup label="Encargado"><select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}><option value="">Seleccionar...</option>{config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
+                  <InputGroup label="UUII (Viviendas)"><input type="number" className="input-field border-blue-200 bg-blue-50 text-blue-800 font-medium" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="Nº..." /></InputGroup>
                 </div>
-                
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2 shadow-inner">
-                   <label className="flex items-center gap-2 cursor-pointer mb-3">
-                     <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
-                     <span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span>
-                   </label>
-                   
-                   {/* DESGLOSE EN VIVO */}
+                   <label className="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} /><span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span></label>
                    <div className="space-y-2 text-xs text-gray-600 border-t border-gray-200 pt-2">
-                      <div className="flex justify-between">
-                        <span>Base:</span> 
-                        <span className="font-medium">{formCalculos.base.toFixed(2)} €</span>
-                      </div>
-                      
-                      {formData.tieneRetencion && (
-                        <div className="flex justify-between text-blue-600">
-                          <span>+ Plus (5%):</span> 
-                          <span className="font-medium">+{formCalculos.plus.toFixed(2)} €</span>
-                        </div>
-                      )}
-
-                      {formCalculos.uuiiVal > 0 && (
-                        <div className="flex justify-between text-purple-600">
-                          <span>+ Viviendas ({formData.uuii}):</span> 
-                          <span className="font-medium">+{formCalculos.uuiiVal.toFixed(2)} €</span>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between font-black text-gray-900 text-lg pt-2 border-t border-gray-200 mt-2">
-                        <span>TOTAL ESTIMADO:</span> 
-                        <span>{formCalculos.totalSinIva.toFixed(2)} €</span>
-                      </div>
+                      <div className="flex justify-between"><span>Base:</span><span className="font-medium">{parseFloat(formData.importe || 0).toFixed(2)} €</span></div>
+                      {formData.tieneRetencion && (<div className="flex justify-between text-blue-600"><span>+ Plus (5%):</span><span className="font-medium">+{(parseFloat(formData.importe || 0)*0.05).toFixed(2)} €</span></div>)}
+                      {parseFloat(formData.uuii) > 0 && (<div className="flex justify-between text-purple-600"><span>+ Viviendas ({formData.uuii}):</span><span className="font-medium">+{(parseFloat(formData.uuii)*1.5).toFixed(2)} €</span></div>)}
+                      <div className="flex justify-between font-black text-gray-900 text-lg pt-2 border-t border-gray-200 mt-2"><span>TOTAL ESTIMADO:</span><span>{(parseFloat(formData.importe || 0) + (formData.tieneRetencion ? parseFloat(formData.importe || 0)*0.05 : 0) + (parseFloat(formData.uuii || 0)*1.5)).toFixed(2)} €</span></div>
                       <p className="text-[10px] text-gray-400 text-center mt-1">* IVA (21%) se calculará en el cierre.</p>
                    </div>
                 </div>
-
-                <div className="flex bg-gray-100 rounded-lg p-1 mt-2">
-                    {['pendiente', 'facturado', 'cobrado'].map(st => (
-                      <button type="button" key={st} onClick={() => setFormData({...formData, estado: st})} className={`flex-1 py-1 text-xs font-bold rounded capitalize ${formData.estado === st ? 'bg-white text-red-600 shadow-sm' : 'text-gray-400'}`}>{st}</button>
-                    ))}
-                </div>
+                <div className="flex bg-gray-100 rounded-lg p-1 mt-2">{['pendiente', 'facturado', 'cobrado'].map(st => (<button type="button" key={st} onClick={() => setFormData({...formData, estado: st})} className={`flex-1 py-1 text-xs font-bold rounded capitalize ${formData.estado === st ? 'bg-white text-red-600 shadow-sm' : 'text-gray-400'}`}>{st}</button>))}</div>
               </div>
-
-              {/* CAMPO OBSERVACIONES */}
               <div className="md:col-span-3">
-                <InputGroup label="Observaciones (Opcional)">
-                  <textarea 
-                    rows={2} 
-                    className="input-field resize-none" 
-                    value={formData.observaciones} 
-                    onChange={e => setFormData({...formData, observaciones: e.target.value})} 
-                    placeholder="Notas adicionales..." 
-                  />
-                </InputGroup>
+                <InputGroup label="Observaciones (Opcional)"><textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} placeholder="Notas adicionales..." /></InputGroup>
               </div>
-
-              <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3">
-                 <button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
-                 <button 
-                    type="submit" 
-                    className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all"
-                 >
-                    Guardar Obra
-                 </button>
-              </div>
+              <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button><button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all">Guardar Obra</button></div>
             </form>
           </div>
         </div>
@@ -939,57 +753,20 @@ export default function App() {
 }
 
 // --- SUBCOMPONENTES AUXILIARES ---
-
 function ConfigSection({ title, items = [], onAdd, onDelete }) {
   const [newValue, setNewValue] = useState('');
   const handleAdd = () => { if(newValue.trim()) { onAdd(newValue.trim()); setNewValue(''); } };
   return (
     <div>
       <h4 className="font-bold text-gray-700 text-sm mb-3">{title}</h4>
-      <div className="flex gap-2 mb-3">
-        <input type="text" value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Añadir nuevo..." className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-red-500" onKeyDown={(e) => e.key === 'Enter' && handleAdd()} />
-        <button onClick={handleAdd} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 rounded-lg"><Plus size={16}/></button>
-      </div>
-      <ul className="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100 text-sm max-h-40 overflow-y-auto">
-        {items.map((item, idx) => (
-          <li key={idx} className="px-3 py-2 flex justify-between items-center group">
-            <span className="text-gray-600">{item}</span>
-            <button onClick={() => onDelete(item)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
-          </li>
-        ))}
-        {items.length === 0 && <li className="px-3 py-2 text-gray-400 italic text-xs">Lista vacía</li>}
-      </ul>
+      <div className="flex gap-2 mb-3"><input type="text" value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Añadir nuevo..." className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-red-500" onKeyDown={(e) => e.key === 'Enter' && handleAdd()} /><button onClick={handleAdd} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 rounded-lg"><Plus size={16}/></button></div>
+      <ul className="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100 text-sm max-h-40 overflow-y-auto">{items.map((item, idx) => (<li key={idx} className="px-3 py-2 flex justify-between items-center group"><span className="text-gray-600">{item}</span><button onClick={() => onDelete(item)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button></li>))}{items.length === 0 && <li className="px-3 py-2 text-gray-400 italic text-xs">Lista vacía</li>}</ul>
     </div>
   );
 }
-
-function NavButton({ icon: Icon, label, active, onClick }) {
-  return (
-    <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-red-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
-      <Icon size={20} />
-      <span className="font-medium text-sm">{label}</span>
-    </button>
-  );
-}
-
-function ReportCard({ title, amount, color, isNegative, isBold }) {
-  return (
-    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm card-resumen">
-      <p className="text-xs text-gray-500 uppercase font-bold mb-1">{title}</p>
-      <p className={`text-xl ${isBold ? 'font-black' : 'font-bold'} ${color}`}>
-        {isNegative && '-'}{amount.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €
-      </p>
-    </div>
-  );
-}
-
-function InputGroup({ label, children }) {
-  return <div><label className="text-xs font-bold text-gray-500 uppercase ml-1 block mb-1">{label}</label>{children}</div>;
-}
-
+function NavButton({ icon: Icon, label, active, onClick }) { return (<button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-red-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}><Icon size={20} /><span className="font-medium text-sm">{label}</span></button>); }
+function ReportCard({ title, amount, color, isNegative, isBold }) { return (<div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm card-resumen"><p className="text-xs text-gray-500 uppercase font-bold mb-1">{title}</p><p className={`text-xl ${isBold ? 'font-black' : 'font-bold'} ${color}`}>{isNegative && '-'}{amount.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €</p></div>); }
+function InputGroup({ label, children }) { return <div><label className="text-xs font-bold text-gray-500 uppercase ml-1 block mb-1">{label}</label>{children}</div>; }
 const style = document.createElement('style');
-style.innerHTML = `
-  .input-field { width: 100%; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem 1rem; font-size: 0.875rem; outline: none; }
-  .input-filter { background: #f9fafb; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem; font-size: 0.875rem; }
-`;
+style.innerHTML = `.input-field { width: 100%; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem 1rem; font-size: 0.875rem; outline: none; } .input-filter { background: #f9fafb; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem; font-size: 0.875rem; }`;
 document.head.appendChild(style);
