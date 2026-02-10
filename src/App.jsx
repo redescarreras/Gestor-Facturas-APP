@@ -4,12 +4,13 @@ import {
   Calculator, TrendingUp, DollarSign, X, CheckCircle, Trash2, 
   ChevronRight, PieChart, Users, Building, MapPin, Menu, Printer,
   Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
-  FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database, CalendarRange
+  FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database, CalendarRange,
+  History, Lock, FileInput
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
-  doc, deleteDoc, query, orderBy, setDoc, getDoc 
+  doc, deleteDoc, query, orderBy, setDoc, getDoc, writeBatch 
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
@@ -63,18 +64,18 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('panel');
   const [obras, setObras] = useState([]);
+  const [ciclos, setCiclos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Navegación Carpetas
   const [navState, setNavState] = useState({ empresa: null, encargado: null });
 
-  // Estados UI
   const [modalOpen, setModalOpen] = useState(false);
   const [editingObra, setEditingObra] = useState(null);
+  const [viewCiclo, setViewCiclo] = useState(null);
+  const [confirmCierre, setConfirmCierre] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
-  // Configuración
   const [config, setConfig] = useState({
     empresas: ['Elecnor', 'Magtel', 'Ezentis', 'Circet'],
     encargados: ['Juan Pérez', 'Ana García'],
@@ -100,20 +101,12 @@ export default function App() {
   };
   const [formData, setFormData] = useState(initialObraState);
 
-  // Filtros Reportes
   const [reportFilter, setReportFilter] = useState({
     empresa: 'Todas',
     encargado: 'Todos'
   });
-
-  // Variable para saber si estamos en modo "Reporte de Encargado"
+  
   const isEncargadoFilter = reportFilter.encargado !== 'Todos';
-
-  // Filtros Cierre Flexible
-  const [closingRange, setClosingRange] = useState({
-    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
 
   const showToast = (msg, type = 'success') => {
     setNotification({ show: true, message: msg, type });
@@ -121,18 +114,17 @@ export default function App() {
 
   // --- CARGA DE DATOS ---
   const loadData = () => {
-    const q = query(collection(db, "obras"));
-    const unsubscribeObras = onSnapshot(q, (snapshot) => {
+    const qObras = query(collection(db, "obras"));
+    const unsubscribeObras = onSnapshot(qObras, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
       setObras(data);
       setLoading(false);
-    }, (error) => {
-      console.error("Error Firestore:", error);
-      if (error.code !== 'permission-denied') {
-         showToast("Error de sincronización.", "error");
-      }
-      setLoading(false);
+    });
+
+    const qCiclos = query(collection(db, "ciclos"), orderBy("fecha", "desc"));
+    const unsubscribeCiclos = onSnapshot(qCiclos, (snapshot) => {
+      setCiclos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     const configRef = doc(db, "configuracion", "listas_generales");
@@ -142,7 +134,6 @@ export default function App() {
     });
   };
 
-  // --- AUTENTICACIÓN ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
@@ -176,7 +167,7 @@ export default function App() {
     const esEdicion = !!editingObra;
     setEditingObra(null);
 
-    showToast("Guardando en la nube...", "info");
+    showToast("Guardando...", "info");
 
     try {
       if (esEdicion) {
@@ -184,20 +175,86 @@ export default function App() {
       } else {
         await addDoc(collection(db, "obras"), { ...obraData, createdAt: new Date() });
       }
-      showToast(esEdicion ? "Actualizado correctamente" : "Obra guardada y sincronizada", "success");
+      showToast(esEdicion ? "Actualizado" : "Guardado", "success");
+    } catch (error) {
+      showToast("Error al guardar", "error");
+    }
+  };
+
+  const handleCerrarCiclo = async () => {
+    if (!user) return;
+    const obrasPendientes = obras.filter(o => o.estado === 'pendiente');
+    
+    if (obrasPendientes.length === 0) {
+      showToast("No hay obras pendientes.", "warning");
+      return;
+    }
+
+    setConfirmCierre(false);
+    showToast("Cerrando ciclo...", "info");
+
+    try {
+      const batch = writeBatch(db);
+      const nombreCiclo = `Cierre ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'long', year: 'numeric'})}`;
+      const cicloRef = doc(collection(db, "ciclos"));
+      
+      const cicloData = {
+        nombre: nombreCiclo,
+        fecha: new Date().toISOString(),
+        obras: obrasPendientes,
+        totalObras: obrasPendientes.length,
+        creadoPor: user.uid
+      };
+      
+      batch.set(cicloRef, cicloData);
+
+      obrasPendientes.forEach(obra => {
+        const obraRef = doc(db, "obras", obra.id);
+        batch.update(obraRef, { estado: 'facturado', cicloId: cicloRef.id });
+      });
+
+      await batch.commit();
+      showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
       console.error(error);
-      showToast("Error al guardar. Verifica permisos.", "error");
+      showToast("Error al cerrar ciclo", "error");
+    }
+  };
+
+  // NUEVA FUNCIÓN: ACTUALIZAR Nº FACTURA EN CICLO
+  const handleUpdateFacturaCiclo = async (obraId, currentFactura) => {
+    const nuevaFactura = prompt("Asignar Nº Factura:", currentFactura || "");
+    if (nuevaFactura === null) return; // Cancelado
+
+    try {
+      // 1. Actualizar en el documento del ciclo (Snapshot)
+      // Nota: Esto es complejo en Firestore arrays, así que actualizamos todo el array del ciclo
+      const updatedObrasCiclo = viewCiclo.obras.map(o => 
+        o.id === obraId ? { ...o, numFactura: nuevaFactura } : o
+      );
+      
+      await updateDoc(doc(db, "ciclos", viewCiclo.id), { obras: updatedObrasCiclo });
+      
+      // 2. Actualizar la obra original también para mantener coherencia
+      await updateDoc(doc(db, "obras", obraId), { numFactura: nuevaFactura });
+
+      // Actualizar vista local
+      setViewCiclo({ ...viewCiclo, obras: updatedObrasCiclo });
+      showToast("Nº Factura asignado", "success");
+
+    } catch (error) {
+      console.error(error);
+      showToast("Error al actualizar factura", "error");
     }
   };
 
   const handleDelete = async (id) => {
-    if (confirm("⚠️ ¿Eliminar expediente? Esta acción se sincronizará en todos los dispositivos.")) {
+    if (confirm("⚠️ ¿Eliminar expediente?")) {
       try {
         await deleteDoc(doc(db, "obras", id));
-        showToast("Expediente eliminado", "success");
+        showToast("Eliminado", "success");
       } catch (error) {
-        showToast("No tienes permiso para eliminar", "error");
+        showToast("Error al eliminar", "error");
       }
     }
   };
@@ -211,17 +268,12 @@ export default function App() {
   const updateConfigList = async (type, action, value) => {
     const currentList = config[type] || [];
     let newList = [...currentList];
-
     if (action === 'add') newList.push(value);
     else if (action === 'delete') newList = newList.filter(item => item !== value);
-
     setConfig(prev => ({ ...prev, [type]: newList }));
-
     try {
       await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList });
-    } catch (error) {
-      showToast("Error de sincronización", 'error');
-    }
+    } catch (error) { showToast("Error config", 'error'); }
   };
 
   const handleExportBackup = () => {
@@ -230,11 +282,10 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `backup_obras_${new Date().toISOString().slice(0,10)}.json`;
+    link.download = `backup_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast("Copia de seguridad descargada", "success");
   };
 
   const handleImportBackup = (e) => {
@@ -244,27 +295,30 @@ export default function App() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target.result);
-        if (!Array.isArray(data)) throw new Error("Formato incorrecto");
-        if (!confirm(`Se han encontrado ${data.length} expedientes. ¿Deseas importarlos a la nube?`)) return;
-        showToast(`Iniciando importación...`, "info");
-        let count = 0;
+        if (!Array.isArray(data)) throw new Error();
+        if (!confirm(`Importar ${data.length} obras?`)) return;
+        showToast(`Importando...`, "info");
         for (const item of data) {
            if(item.id) await setDoc(doc(db, "obras", item.id), item);
            else await addDoc(collection(db, "obras"), item);
-           count++;
         }
-        showToast(`Importación completada: ${count} obras.`, "success");
-      } catch (error) {
-        showToast("Error al importar. Formato inválido.", "error");
-      }
+        showToast(`Completado`, "success");
+      } catch (error) { showToast("Archivo inválido", "error"); }
     };
     reader.readAsText(file);
     e.target.value = '';
   };
 
-  // --- CÁLCULOS PRINCIPALES ---
+  // --- CÁLCULOS ---
+  const sourceData = useMemo(() => {
+    if (activeTab === 'cierres' && viewCiclo) {
+      return viewCiclo.obras;
+    }
+    return obras;
+  }, [obras, activeTab, viewCiclo]);
+
   const obrasFiltradas = useMemo(() => {
-    return obras.filter(o => {
+    return sourceData.filter(o => {
       const matchSearch = 
         o.nombre?.toLowerCase().includes(searchQuery.toLowerCase()) || 
         o.idCarreras?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -273,15 +327,10 @@ export default function App() {
       
       if (searchQuery) return matchSearch;
 
-      if (activeTab === 'reportes') {
+      if (activeTab === 'reportes' || (activeTab === 'cierres' && viewCiclo)) {
         const matchEmpresa = reportFilter.empresa === 'Todas' || o.cliente === reportFilter.empresa;
         const matchEncargado = reportFilter.encargado === 'Todos' || o.encargado === reportFilter.encargado;
         return matchEmpresa && matchEncargado;
-      }
-
-      if (activeTab === 'cierres') {
-        if (!closingRange.start || !closingRange.end) return true;
-        return o.fecha >= closingRange.start && o.fecha <= closingRange.end;
       }
 
       if (activeTab === 'panel') {
@@ -291,7 +340,7 @@ export default function App() {
       }
       return matchSearch;
     });
-  }, [obras, searchQuery, activeTab, reportFilter, navState, closingRange]);
+  }, [sourceData, searchQuery, activeTab, reportFilter, navState, viewCiclo]);
 
   const totales = useMemo(() => {
     const base = obrasFiltradas.reduce((acc, curr) => acc + (parseFloat(curr.importe) || 0), 0);
@@ -300,10 +349,7 @@ export default function App() {
     const uuii = obrasFiltradas.reduce((acc, curr) => acc + ((parseFloat(curr.uuii) || 0) * 1.50), 0);
 
     const totalConIva = base + iva + plus + uuii;
-    // Total sin IVA (para panel, carpetas y reportes de encargado)
     const totalSinIva = base + plus + uuii;
-    
-    // NUEVO CÁLCULO ESTRICTO: Base + Plus (Sin UUII, Sin IVA)
     const totalBasePlus = base + plus;
 
     return { base, iva, plus, uuii, totalConIva, totalSinIva, totalBasePlus };
@@ -314,14 +360,12 @@ export default function App() {
     obras.forEach(obra => {
       const emp = obra.cliente || 'Sin Empresa';
       const enc = obra.encargado || 'Sin Encargado';
-      
       if (!tree[emp]) tree[emp] = { totalPendiente: 0, encargados: {} };
       
       if (obra.estado === 'pendiente') {
         const base = parseFloat(obra.importe) || 0;
         const plus = obra.tieneRetencion ? base * 0.05 : 0;
         const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
-        
         const totalObra = base + plus + uuiiVal;
 
         tree[emp].totalPendiente += totalObra;
@@ -339,7 +383,6 @@ export default function App() {
     const iva = base * 0.21;
     const plus = formData.tieneRetencion ? base * 0.05 : 0;
     const uuiiVal = (parseFloat(formData.uuii) || 0) * 1.50;
-    
     const totalSinIva = base + plus + uuiiVal; 
     return { base, iva, plus, uuiiVal, totalSinIva };
   }, [formData.importe, formData.tieneRetencion, formData.uuii]);
@@ -350,6 +393,9 @@ export default function App() {
     if (activeTab !== 'panel') {
       setNavState({ empresa: null, encargado: null });
       setSearchQuery('');
+    }
+    if (activeTab !== 'cierres') {
+      setViewCiclo(null);
     }
   }, [activeTab]);
 
@@ -379,14 +425,12 @@ export default function App() {
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
-          <div>
-            <h1 className="font-bold text-lg leading-tight">REDES<br/>CARRERAS</h1>
-          </div>
+          <div><h1 className="font-bold text-lg leading-tight">REDES<br/>CARRERAS</h1></div>
         </div>
         <nav className="flex-1 p-4 space-y-2">
           <NavButton icon={LayoutGrid} label="Panel Principal" active={activeTab === 'panel'} onClick={() => setActiveTab('panel')} />
           <NavButton icon={FileText} label="Reportes" active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} />
-          <NavButton icon={Calendar} label="Cierres Personalizados" active={activeTab === 'cierres'} onClick={() => setActiveTab('cierres')} />
+          <NavButton icon={History} label="Cierre de Ciclos" active={activeTab === 'cierres'} onClick={() => setActiveTab('cierres')} />
           <NavButton icon={Settings} label="Ajustes" active={activeTab === 'ajustes'} onClick={() => setActiveTab('ajustes')} />
         </nav>
       </aside>
@@ -398,14 +442,11 @@ export default function App() {
         <div className="print-header w-full">
           <div className="flex items-center gap-6">
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
-             <div>
-               <h1 className="text-3xl font-bold text-gray-900 leading-none">REDES CARRERAS S.L.</h1>
-               <p className="text-base text-gray-600 mt-1">Informe de Gestión</p>
-             </div>
+             <div><h1 className="text-3xl font-bold text-gray-900 leading-none">REDES CARRERAS S.L.</h1><p className="text-base text-gray-600 mt-1">Informe de Gestión</p></div>
           </div>
           <div className="text-right text-xs text-gray-500">
              <p className="font-bold">{new Date().toLocaleDateString()}</p>
-             {activeTab === 'cierres' && <p>Periodo: {new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p>}
+             {viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}
           </div>
         </div>
 
@@ -414,15 +455,12 @@ export default function App() {
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
             {activeTab === 'panel' && <><LayoutGrid className="text-red-600"/> Panel Principal</>}
             {activeTab === 'reportes' && <><FileText className="text-red-600"/> Reportes Generales</>}
-            {activeTab === 'cierres' && <><Calendar className="text-red-600"/> Cierre de Mes / Periodo</>}
+            {activeTab === 'cierres' && <><History className="text-red-600"/> Historial de Cierres</>}
             {activeTab === 'ajustes' && <><Settings className="text-red-600"/> Ajustes</>}
           </h2>
           <div className="flex items-center gap-4">
             {activeTab === 'panel' && (
-              <button 
-                onClick={() => { setFormData(initialObraState); setEditingObra(null); setModalOpen(true); }}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-all active:scale-95"
-              >
+              <button onClick={() => { setFormData(initialObraState); setEditingObra(null); setModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-all active:scale-95">
                 <Plus size={18} /> <span className="hidden sm:inline">Añadir Obra</span>
               </button>
             )}
@@ -432,10 +470,9 @@ export default function App() {
         {/* CONTENIDO */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 print:p-0">
           
-          {/* PANEL PRINCIPAL */}
+          {/* VISTA 1: PANEL PRINCIPAL */}
           {activeTab === 'panel' && (
             <div className="space-y-6">
-              
               {/* BARRA SUPERIOR */}
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end no-print">
                 <div className="relative w-full md:w-96">
@@ -451,7 +488,7 @@ export default function App() {
                 )}
               </div>
 
-              {/* CONTENIDO */}
+              {/* CONTENIDO CARPETAS O TABLA */}
               {(searchQuery || (navState.empresa && navState.encargado)) ? (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden card-resumen animate-in fade-in slide-in-from-bottom-2">
                   {!searchQuery && navState.empresa && (
@@ -469,16 +506,12 @@ export default function App() {
                         {obrasFiltradas.map(obra => {
                           const base = parseFloat(obra.importe) || 0;
                           const totalConPlus = base + (obra.tieneRetencion ? base * 0.05 : 0);
-                          
                           return (
                           <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
                             <td className="px-6 py-4 font-mono font-medium text-gray-500">{obra.idCarreras || "-"}</td>
                             <td className="px-6 py-4"><div className="font-medium text-gray-900">{obra.nombre}</div><div className="text-xs text-gray-500">{obra.idObra}</div>{searchQuery && <div className="text-[10px] text-red-500 mt-1">{obra.cliente} - {obra.encargado}</div>}</td>
                             <td className="px-6 py-4 font-bold text-gray-900">{Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                            <td className="px-6 py-4 text-center font-bold text-blue-800">
-                              {/* Mostrar importe Total con 5% */}
-                              {totalConPlus.toLocaleString('es-ES', {minimumFractionDigits: 2})} €
-                            </td>
+                            <td className="px-6 py-4 text-center font-bold text-blue-800">{totalConPlus.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                             <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-full text-xs font-bold ${obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{obra.estado.toUpperCase()}</span></td>
                             <td className="px-6 py-4 text-right no-print"><div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button><button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button></div></td>
                           </tr>
@@ -500,66 +533,35 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="animate-in fade-in">
-                  <div className="bg-white p-4 rounded-xl border border-gray-200 mb-6 flex justify-between items-center shadow-sm">
-                    <div className="flex items-center gap-3"><button onClick={() => setNavState({empresa: null, encargado: null})} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft size={20} className="text-gray-600" /></button><h2 className="text-xl font-bold text-gray-800">{navState.empresa}</h2></div>
-                    <div className="text-right px-2"><span className="text-xs text-gray-500 uppercase font-bold">Total Pendiente Empresa</span><p className="text-2xl font-bold text-red-600">{treeData[navState.empresa]?.totalPendiente.toLocaleString()} €</p></div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {Object.keys(treeData[navState.empresa]?.encargados || {}).map(encargado => (
-                      <div key={encargado} onClick={() => setNavState({ ...navState, encargado })} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in">
+                  {Object.keys(treeData[navState.empresa]?.encargados || {}).map(encargado => (
+                    <div key={encargado} onClick={() => setNavState({ ...navState, encargado })} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group">
                         <div className="flex items-center gap-4 mb-4"><div className="bg-blue-50 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Users size={24} /></div><div><h4 className="font-bold text-gray-800">{encargado}</h4><p className="text-xs text-gray-500">Ver obras</p></div></div>
                         <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span><span className="text-lg font-bold text-gray-900">{treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €</span></div>
-                      </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* VISTA: REPORTES Y CIERRES */}
-          {(activeTab === 'reportes' || activeTab === 'cierres') && (
+          {/* VISTA 2: REPORTES */}
+          {activeTab === 'reportes' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
                 <div className="flex items-center gap-2 text-gray-500 font-bold text-sm mr-2"><Filter size={18} /> FILTRAR:</div>
-                {activeTab === 'reportes' && (
-                  <>
-                    <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas las Empresas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
-                    <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
-                  </>
-                )}
-                {activeTab === 'cierres' && (
-                  <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
-                    <span className="text-xs font-bold text-gray-500 pl-2">Desde:</span><input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.start} onChange={e => setClosingRange({...closingRange, start: e.target.value})} />
-                    <span className="text-xs font-bold text-gray-500">Hasta:</span><input type="date" className="bg-transparent text-sm p-1 outline-none" value={closingRange.end} onChange={e => setClosingRange({...closingRange, end: e.target.value})} />
-                  </div>
-                )}
+                <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas las Empresas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                 <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg"><Download size={16} /> Imprimir / PDF</button>
               </div>
 
-              {activeTab === 'cierres' && (<div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end"><h3 className="text-xl font-bold uppercase text-gray-800">Cierre del Periodo</h3><p className="text-sm font-medium text-gray-500">{new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p></div>)}
-
               {/* TARJETAS SUPERIORES */}
-              {/* Adjusted columns for better fit with the new card */}
               <div className={`grid grid-cols-2 ${isEncargadoFilter ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4`}>
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
-                
-                {/* Ocultar IVA si es filtro de encargado */}
                 {!isEncargadoFilter && <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />}
-                
                 <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
-                
-                {/* NUEVA TARJETA: Total Base + Plus */}
                 <ReportCard title="Total (Base + Plus)" amount={totales.totalBasePlus} color="text-purple-700" />
-                
-                <ReportCard 
-                  title="TOTAL FACTURACIÓN" 
-                  // Si es encargado, mostramos Total Base + Plus (Sin IVA)
-                  // Si es empresa, mostramos Total Con IVA
-                  amount={isEncargadoFilter ? totales.totalBasePlus : totales.totalConIva} 
-                  color="text-red-600" isBold 
-                />
+                <ReportCard title="TOTAL FACTURACIÓN" amount={isEncargadoFilter ? totales.totalBasePlus : totales.totalConIva} color="text-red-600" isBold />
               </div>
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen">
@@ -581,22 +583,10 @@ export default function App() {
                       <div className="mb-2 sm:mb-0 w-1/4"><p className="font-bold text-gray-900">{group}</p><p className="text-xs text-gray-500">{data.count} expedientes</p></div>
                       <div className="text-right flex-1 flex justify-end gap-6 text-sm">
                         <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
-                        
-                        {/* Ocultar Columna IVA si es encargado */}
-                        {!isEncargadoFilter && (
-                          <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
-                        )}
-                        
+                        {!isEncargadoFilter && <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>}
                         <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
                         {data.uuii > 0 && <div className="w-20"><p className="text-gray-400 text-xs">UUII</p><p className="font-medium text-purple-600">{data.uuii.toLocaleString()} €</p></div>}
-                        
-                        <div className="w-24">
-                          <p className="text-gray-400 text-xs font-bold">Total</p>
-                          <p className="font-bold text-green-700 text-lg">
-                            {/* Total condicional: Sin IVA si es encargado (Base+Plus) */}
-                            {(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString()} €
-                          </p>
-                        </div>
+                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString()} €</p></div>
                       </div>
                     </div>
                   ))}
@@ -604,31 +594,122 @@ export default function App() {
               </div>
 
               {/* LISTA DETALLADA PARA REPORTES (NUEVO) */}
-              {activeTab === 'reportes' && (
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
                    <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Expedientes</h3>
                    <table className="w-full text-xs text-left">
-                     <thead>
-                       <tr className="border-b bg-gray-50">
-                         <th className="py-2 px-2">Fecha</th>
-                         <th className="py-2 px-2">ID</th>
-                         <th className="py-2 px-2">Central</th>
-                         <th className="py-2 px-2">Obra</th>
-                         <th className="py-2 px-2">Observaciones</th>
-                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
-                       </tr>
-                     </thead>
+                     <thead><tr className="border-b bg-gray-50"><th className="py-2 px-2">Fecha</th><th className="py-2 px-2">ID</th><th className="py-2 px-2">Central</th><th className="py-2 px-2">Obra</th><th className="py-2 px-2">Observaciones</th><th className="py-2 px-2 text-right">Total 5% Incl.</th></tr></thead>
                      <tbody>
                        {obrasFiltradas.map(o => {
                          const base = parseFloat(o.importe) || 0;
                          const plus = o.tieneRetencion ? base * 0.05 : 0;
                          const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
-                         // Total en detalle: Base + Plus + UUII (Sin IVA)
+                         const totalFila = base + plus + uuiiVal;
+                         return (
+                           <tr key={o.id} className="border-b border-gray-50"><td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td><td className="py-1 px-2 font-mono">{o.idCarreras}</td><td className="py-1 px-2">{o.central}</td><td className="py-1 px-2">{o.nombre}</td><td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td><td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString()} €</td></tr>
+                         )
+                       })}
+                     </tbody>
+                   </table>
+              </div>
+            </div>
+          )}
+
+          {/* VISTA 3: CIERRE DE CICLOS */}
+          {activeTab === 'cierres' && !viewCiclo && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="flex justify-between items-center no-print">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Historial de Ciclos</h3>
+                  <p className="text-sm text-gray-500">Consulta los cierres pasados o genera uno nuevo.</p>
+                </div>
+                <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
+                  <Lock size={18} /> Cerrar Ciclo Actual
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {ciclos.length === 0 && <p className="col-span-full text-center text-gray-400 py-12 bg-white rounded-xl border border-dashed border-gray-300">No hay ciclos cerrados todavía.</p>}
+                {ciclos.map(ciclo => (
+                  <div key={ciclo.id} onClick={() => setViewCiclo(ciclo)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg cursor-pointer transition-all group">
+                    <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-3 rounded-lg text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><History size={24}/></div><span className="text-xs text-gray-400 font-mono">{new Date(ciclo.fecha).toLocaleDateString()}</span></div>
+                    <h4 className="font-bold text-lg text-gray-800 mb-1">{ciclo.nombre}</h4><p className="text-sm text-gray-500 mb-4">{ciclo.totalObras} expedientes</p>
+                    <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase">Facturado</p><p className="text-xl font-bold text-gray-900">{ciclo.obras.reduce((acc, o) => acc + (parseFloat(o.importe)||0), 0).toLocaleString()} €</p></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* VISTA 3.1: DETALLE DE UN CICLO (REUTILIZA VISTA REPORTES PERO CON EDITAR FACTURA) */}
+          {activeTab === 'cierres' && viewCiclo && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
+                <button onClick={() => setViewCiclo(null)} className="flex items-center gap-2 text-gray-600 hover:text-red-600 font-bold"><ArrowLeft size={18}/> Volver al Historial</button>
+                <div className="flex items-center gap-4">
+                  <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                  <button onClick={handlePrint} className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black"><Download size={16} /> Descargar PDF</button>
+                </div>
+              </div>
+
+              <div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end">
+                <h3 className="text-xl font-bold uppercase text-gray-800">{viewCiclo.nombre}</h3>
+                <p className="text-sm font-medium text-gray-500">Cierre Oficial</p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
+                <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />
+                <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
+                <ReportCard title="Total (Base + Plus)" amount={totales.totalBasePlus} color="text-purple-700" />
+                <ReportCard title="TOTAL FACTURACIÓN" amount={totales.totalConIva} color="text-red-600" isBold />
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen">
+                <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Desglose por Empresa</h3>
+                <div className="space-y-4">
+                  {Object.entries(obrasFiltradas.reduce((acc, obra) => {
+                      const key = obra.cliente;
+                      if (!acc[key]) acc[key] = { base: 0, iva: 0, plus: 0, uuii: 0, count: 0 };
+                      const importe = parseFloat(obra.importe) || 0;
+                      const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
+                      acc[key].base += importe;
+                      acc[key].iva += importe * 0.21;
+                      acc[key].uuii += uuiiVal;
+                      if(obra.tieneRetencion) acc[key].plus += importe * 0.05;
+                      acc[key].count += 1;
+                      return acc;
+                  }, {})).map(([group, data]) => (
+                    <div key={group} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-100 transition-all">
+                      <div className="mb-2 sm:mb-0 w-1/4"><p className="font-bold text-gray-900">{group}</p><p className="text-xs text-gray-500">{data.count} expedientes</p></div>
+                      <div className="text-right flex-1 flex justify-end gap-6 text-sm">
+                        <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
+                        <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>
+                        <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
+                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus + data.uuii).toLocaleString()} €</p></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* LISTA DETALLADA DEL CICLO CON EDITAR FACTURA */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
+                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Expedientes</h3>
+                   <table className="w-full text-xs text-left">
+                     <thead><tr className="border-b bg-gray-50"><th className="py-2 px-2">Fecha</th><th className="py-2 px-2">ID</th><th className="py-2 px-2">Nº Factura</th><th className="py-2 px-2">Central</th><th className="py-2 px-2">Obra</th><th className="py-2 px-2">Observaciones</th><th className="py-2 px-2 text-right">Total 5% Incl.</th></tr></thead>
+                     <tbody>
+                       {obrasFiltradas.map(o => {
+                         const base = parseFloat(o.importe) || 0;
+                         const plus = o.tieneRetencion ? base * 0.05 : 0;
+                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
                          const totalFila = base + plus + uuiiVal;
                          return (
                            <tr key={o.id} className="border-b border-gray-50">
                              <td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td>
                              <td className="py-1 px-2 font-mono">{o.idCarreras}</td>
+                             <td className="py-1 px-2 flex items-center gap-2">
+                               <span className={o.numFactura ? "font-bold text-gray-800" : "text-gray-300 italic"}>{o.numFactura || "Pendiente"}</span>
+                               <button onClick={() => handleUpdateFacturaCiclo(o.id, o.numFactura)} className="text-blue-600 hover:text-blue-800 p-1 no-print"><Edit size={12}/></button>
+                             </td>
                              <td className="py-1 px-2">{o.central}</td>
                              <td className="py-1 px-2">{o.nombre}</td>
                              <td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td>
@@ -638,46 +719,7 @@ export default function App() {
                        })}
                      </tbody>
                    </table>
-                </div>
-              )}
-
-              {/* LISTA DETALLADA PARA CIERRES */}
-              {activeTab === 'cierres' && (
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
-                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Obras</h3>
-                   <table className="w-full text-xs text-left">
-                     <thead>
-                       <tr className="border-b bg-gray-50">
-                         <th className="py-2 px-2">Fecha</th>
-                         <th className="py-2 px-2">ID</th>
-                         <th className="py-2 px-2">Central</th>
-                         <th className="py-2 px-2">Obra</th>
-                         <th className="py-2 px-2">Observaciones</th>
-                         {/* CAMBIO: Base -> Total 5% Incl. */}
-                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
-                       </tr>
-                     </thead>
-                     <tbody>
-                       {obrasFiltradas.map(o => {
-                         const base = parseFloat(o.importe) || 0;
-                         const plus = o.tieneRetencion ? base * 0.05 : 0;
-                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
-                         const totalFila = base + plus + uuiiVal;
-                         return (
-                         <tr key={o.id} className="border-b border-gray-50">
-                           <td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td>
-                           <td className="py-1 px-2 font-mono">{o.idCarreras}</td>
-                           <td className="py-1 px-2">{o.central}</td>
-                           <td className="py-1 px-2">{o.nombre}</td>
-                           <td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td>
-                           {/* CAMBIO: Mostrar Importe + Plus + UUII */}
-                           <td className="py-1 px-2 text-right font-medium">{totalFila.toLocaleString()} €</td>
-                         </tr>
-                       )})}
-                     </tbody>
-                   </table>
-                </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -754,6 +796,22 @@ export default function App() {
               </div>
               <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button><button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all">Guardar Obra</button></div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFIRMACION CIERRE CICLO */}
+      {confirmCierre && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
+            </div>
           </div>
         </div>
       )}
