@@ -302,7 +302,11 @@ export default function App() {
     const totalConIva = base + iva + plus + uuii;
     // Total sin IVA (para panel, carpetas y reportes de encargado)
     const totalSinIva = base + plus + uuii;
-    return { base, iva, plus, uuii, totalConIva, totalSinIva };
+    
+    // NUEVO CÁLCULO ESTRICTO: Base + Plus (Sin UUII, Sin IVA)
+    const totalBasePlus = base + plus;
+
+    return { base, iva, plus, uuii, totalConIva, totalSinIva, totalBasePlus };
   }, [obrasFiltradas]);
 
   const treeData = useMemo(() => {
@@ -465,9 +469,6 @@ export default function App() {
                         {obrasFiltradas.map(obra => {
                           const base = parseFloat(obra.importe) || 0;
                           const totalConPlus = base + (obra.tieneRetencion ? base * 0.05 : 0);
-                          const uuiiVal = (parseFloat(obra.uuii) || 0) * 1.50;
-                          // El total que se muestra en la tabla es Base + Plus (Sin UUII aqui según v17, o con? El usuario pidio "Total 5% Incl")
-                          // Vamos a mostrar Base + Plus como pidió especificamente.
                           
                           return (
                           <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
@@ -540,15 +541,23 @@ export default function App() {
               {activeTab === 'cierres' && (<div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end"><h3 className="text-xl font-bold uppercase text-gray-800">Cierre del Periodo</h3><p className="text-sm font-medium text-gray-500">{new Date(closingRange.start).toLocaleDateString()} - {new Date(closingRange.end).toLocaleDateString()}</p></div>)}
 
               {/* TARJETAS SUPERIORES */}
-              <div className={`grid grid-cols-2 ${isEncargadoFilter ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4`}>
+              {/* Adjusted columns for better fit with the new card */}
+              <div className={`grid grid-cols-2 ${isEncargadoFilter ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4`}>
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
+                
                 {/* Ocultar IVA si es filtro de encargado */}
                 {!isEncargadoFilter && <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />}
+                
                 <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
+                
+                {/* NUEVA TARJETA: Total Base + Plus */}
+                <ReportCard title="Total (Base + Plus)" amount={totales.totalBasePlus} color="text-purple-700" />
+                
                 <ReportCard 
                   title="TOTAL FACTURACIÓN" 
-                  // Si es encargado, mostramos total sin IVA (Base+Plus+UUII), si no, con IVA
-                  amount={isEncargadoFilter ? totales.totalSinIva : totales.totalConIva} 
+                  // Si es encargado, mostramos Total Base + Plus (Sin IVA)
+                  // Si es empresa, mostramos Total Con IVA
+                  amount={isEncargadoFilter ? totales.totalBasePlus : totales.totalConIva} 
                   color="text-red-600" isBold 
                 />
               </div>
@@ -584,8 +593,8 @@ export default function App() {
                         <div className="w-24">
                           <p className="text-gray-400 text-xs font-bold">Total</p>
                           <p className="font-bold text-green-700 text-lg">
-                            {/* Total condicional: Sin IVA si es encargado */}
-                            {(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + data.uuii).toLocaleString()} €
+                            {/* Total condicional: Sin IVA si es encargado (Base+Plus) */}
+                            {(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString()} €
                           </p>
                         </div>
                       </div>
