@@ -221,24 +221,18 @@ export default function App() {
     }
   };
 
-  // NUEVA FUNCIÓN: ACTUALIZAR Nº FACTURA EN CICLO
   const handleUpdateFacturaCiclo = async (obraId, currentFactura) => {
     const nuevaFactura = prompt("Asignar Nº Factura:", currentFactura || "");
-    if (nuevaFactura === null) return; // Cancelado
+    if (nuevaFactura === null) return;
 
     try {
-      // 1. Actualizar en el documento del ciclo (Snapshot)
-      // Nota: Esto es complejo en Firestore arrays, así que actualizamos todo el array del ciclo
       const updatedObrasCiclo = viewCiclo.obras.map(o => 
         o.id === obraId ? { ...o, numFactura: nuevaFactura } : o
       );
       
       await updateDoc(doc(db, "ciclos", viewCiclo.id), { obras: updatedObrasCiclo });
-      
-      // 2. Actualizar la obra original también para mantener coherencia
       await updateDoc(doc(db, "obras", obraId), { numFactura: nuevaFactura });
 
-      // Actualizar vista local
       setViewCiclo({ ...viewCiclo, obras: updatedObrasCiclo });
       showToast("Nº Factura asignado", "success");
 
@@ -593,7 +587,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LISTA DETALLADA PARA REPORTES (NUEVO) */}
+              {/* LISTA DETALLADA PARA REPORTES */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
                    <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Detalle de Expedientes</h3>
                    <table className="w-full text-xs text-left">
@@ -766,6 +760,10 @@ export default function App() {
                 <InputGroup label="ID Carreras"><input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" /></InputGroup>
                 <InputGroup label="ID Obra (Cliente)"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" /></InputGroup>
                 <InputGroup label="Nº Contrato"><select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}><option value="">Seleccionar...</option>{config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
+                {/* CAMPO Nº FACTURA AÑADIDO */}
+                <InputGroup label="Nº Factura (Opcional)">
+                   <input className="input-field" value={formData.numFactura} onChange={e => setFormData({...formData, numFactura: e.target.value})} placeholder="Ej. F-2024-001" />
+                </InputGroup>
               </div>
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="Nombre Obra"><textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
@@ -796,22 +794,6 @@ export default function App() {
               </div>
               <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button><button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all">Guardar Obra</button></div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CONFIRMACION CIERRE CICLO */}
-      {confirmCierre && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
-          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
-              <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
-            </div>
           </div>
         </div>
       )}
