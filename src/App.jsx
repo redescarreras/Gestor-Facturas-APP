@@ -181,8 +181,10 @@ export default function App() {
     }
   };
 
+  // --- FUNCIÓN DE CIERRE CORREGIDA Y ROBUSTA ---
   const handleCerrarCiclo = async () => {
     if (!user) return;
+    
     const obrasPendientes = obras.filter(o => o.estado === 'pendiente');
     
     if (obrasPendientes.length === 0) {
@@ -191,33 +193,59 @@ export default function App() {
     }
 
     setConfirmCierre(false);
-    showToast("Cerrando ciclo...", "info");
+    showToast("Cerrando ciclo y archivando...", "info");
 
     try {
-      const batch = writeBatch(db);
+      // 1. Sanitizar las obras (Evita bloqueos de Firestore por fechas complejas o campos vacíos)
+      const obrasSanitizadas = obrasPendientes.map(obra => {
+        const clean = { ...obra };
+        // Eliminar valores undefined
+        Object.keys(clean).forEach(key => clean[key] === undefined && delete clean[key]);
+        // Limpiar objetos Timestamp si existen (Firestore falla al anidar Timestamps en Arrays)
+        if (clean.createdAt && typeof clean.createdAt.toDate === 'function') clean.createdAt = clean.createdAt.toDate().toISOString();
+        if (clean.updatedAt && typeof clean.updatedAt.toDate === 'function') clean.updatedAt = clean.updatedAt.toDate().toISOString();
+        return clean;
+      });
+
+      // 2. Crear documento de Ciclo seguro
       const nombreCiclo = `Cierre ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'long', year: 'numeric'})}`;
-      const cicloRef = doc(collection(db, "ciclos"));
       
       const cicloData = {
         nombre: nombreCiclo,
         fecha: new Date().toISOString(),
-        obras: obrasPendientes,
-        totalObras: obrasPendientes.length,
+        obras: obrasSanitizadas,
+        totalObras: obrasSanitizadas.length,
         creadoPor: user.uid
       };
       
-      batch.set(cicloRef, cicloData);
+      // Guardar Ciclo en la nube primero
+      const cicloRef = await addDoc(collection(db, "ciclos"), cicloData);
 
-      obrasPendientes.forEach(obra => {
+      // 3. Actualizar estado de las obras originales (Procesamiento por lotes seguro)
+      let batch = writeBatch(db);
+      let count = 0;
+
+      for (const obra of obrasPendientes) {
         const obraRef = doc(db, "obras", obra.id);
         batch.update(obraRef, { estado: 'facturado', cicloId: cicloRef.id });
-      });
+        count++;
 
-      await batch.commit();
+        // Prevención: Firestore solo permite 500 operaciones por lote
+        if (count >= 450) {
+          await batch.commit();
+          batch = writeBatch(db); // Iniciar nuevo lote
+          count = 0;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+
       showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
-      console.error(error);
-      showToast("Error al cerrar ciclo", "error");
+      console.error("Error al cerrar ciclo:", error);
+      showToast("Error al procesar el cierre. Verifica la consola.", "error");
     }
   };
 
@@ -226,7 +254,7 @@ export default function App() {
     if (nuevaFactura === null) return;
 
     try {
-      const updatedObrasCiclo = viewCiclo.obras.map(o => 
+      const updatedObrasCiclo = (viewCiclo.obras || []).map(o => 
         o.id === obraId ? { ...o, numFactura: nuevaFactura } : o
       );
       
@@ -306,7 +334,7 @@ export default function App() {
   // --- CÁLCULOS ---
   const sourceData = useMemo(() => {
     if (activeTab === 'cierres' && viewCiclo) {
-      return viewCiclo.obras;
+      return viewCiclo.obras || []; // Previene errores si está vacío
     }
     return obras;
   }, [obras, activeTab, viewCiclo]);
@@ -626,7 +654,7 @@ export default function App() {
                   <div key={ciclo.id} onClick={() => setViewCiclo(ciclo)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg cursor-pointer transition-all group">
                     <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-3 rounded-lg text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><History size={24}/></div><span className="text-xs text-gray-400 font-mono">{new Date(ciclo.fecha).toLocaleDateString()}</span></div>
                     <h4 className="font-bold text-lg text-gray-800 mb-1">{ciclo.nombre}</h4><p className="text-sm text-gray-500 mb-4">{ciclo.totalObras} expedientes</p>
-                    <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase">Facturado</p><p className="text-xl font-bold text-gray-900">{ciclo.obras.reduce((acc, o) => acc + (parseFloat(o.importe)||0), 0).toLocaleString()} €</p></div>
+                    <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase">Facturado</p><p className="text-xl font-bold text-gray-900">{(ciclo.obras || []).reduce((acc, o) => acc + (parseFloat(o.importe)||0), 0).toLocaleString()} €</p></div>
                   </div>
                 ))}
               </div>
@@ -760,7 +788,6 @@ export default function App() {
                 <InputGroup label="ID Carreras"><input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" /></InputGroup>
                 <InputGroup label="ID Obra (Cliente)"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" /></InputGroup>
                 <InputGroup label="Nº Contrato"><select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}><option value="">Seleccionar...</option>{config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                {/* CAMPO Nº FACTURA AÑADIDO */}
                 <InputGroup label="Nº Factura (Opcional)">
                    <input className="input-field" value={formData.numFactura} onChange={e => setFormData({...formData, numFactura: e.target.value})} placeholder="Ej. F-2024-001" />
                 </InputGroup>
@@ -794,6 +821,22 @@ export default function App() {
               </div>
               <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button><button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all">Guardar Obra</button></div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFIRMACION CIERRE CICLO */}
+      {confirmCierre && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
+            </div>
           </div>
         </div>
       )}
