@@ -349,13 +349,21 @@ export default function App() {
       
       if (searchQuery) return matchSearch;
 
-      if (activeTab === 'reportes' || (activeTab === 'cierres' && viewCiclo)) {
+      if (activeTab === 'reportes') {
+        if (o.estado !== 'pendiente') return false; // <-- SOLO MUESTRA PENDIENTES
+        const matchEmpresa = reportFilter.empresa === 'Todas' || o.cliente === reportFilter.empresa;
+        const matchEncargado = reportFilter.encargado === 'Todos' || o.encargado === reportFilter.encargado;
+        return matchEmpresa && matchEncargado;
+      }
+
+      if (activeTab === 'cierres' && viewCiclo) {
         const matchEmpresa = reportFilter.empresa === 'Todas' || o.cliente === reportFilter.empresa;
         const matchEncargado = reportFilter.encargado === 'Todos' || o.encargado === reportFilter.encargado;
         return matchEmpresa && matchEncargado;
       }
 
       if (activeTab === 'panel') {
+        if (o.estado !== 'pendiente') return false; // <-- SOLO MUESTRA PENDIENTES
         if (navState.empresa && o.cliente !== navState.empresa) return false;
         if (navState.encargado && o.encargado !== navState.encargado) return false;
         return true;
