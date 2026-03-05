@@ -304,7 +304,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `backup_${new Date().toISOString().slice(0,10)}.json`;
+    link.download = `backup_Gestión_de_Obras_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -340,7 +340,7 @@ export default function App() {
   }, [obras, activeTab, viewCiclo]);
 
   const obrasFiltradas = useMemo(() => {
-    return sourceData.filter(o => {
+    const filtered = sourceData.filter(o => {
       const matchSearch = 
         o.nombre?.toLowerCase().includes(searchQuery.toLowerCase()) || 
         o.idCarreras?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -370,6 +370,9 @@ export default function App() {
       }
       return matchSearch;
     });
+
+    // Ordenar siempre por fecha descendente (las últimas primero)
+    return filtered.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   }, [sourceData, searchQuery, activeTab, reportFilter, navState, viewCiclo]);
 
   const totales = useMemo(() => {
@@ -530,7 +533,7 @@ export default function App() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                       <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
-                        <tr><th className="px-6 py-4">ID Carreras</th><th className="px-6 py-4">Obra / ID</th><th className="px-6 py-4">Importe Base</th><th className="px-6 py-4 text-center">Total 5% Incl.</th><th className="px-6 py-4 text-center">Estado</th><th className="px-6 py-4 text-right no-print">Acciones</th></tr>
+                        <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">ID Carreras</th><th className="px-6 py-4">Obra / ID</th><th className="px-6 py-4">Importe Base</th><th className="px-6 py-4 text-center">Total 5% Incl.</th><th className="px-6 py-4 text-center">Estado</th><th className="px-6 py-4 text-right no-print">Acciones</th></tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {obrasFiltradas.map(obra => {
@@ -538,6 +541,7 @@ export default function App() {
                           const totalConPlus = base + (obra.tieneRetencion ? base * 0.05 : 0);
                           return (
                           <tr key={obra.id} className="hover:bg-red-50/30 transition-colors group">
+                            <td className="px-6 py-4 whitespace-nowrap text-gray-500">{new Date(obra.fecha).toLocaleDateString()}</td>
                             <td className="px-6 py-4 font-mono font-medium text-gray-500">{obra.idCarreras || "-"}</td>
                             <td className="px-6 py-4"><div className="font-medium text-gray-900">{obra.nombre}</div><div className="text-xs text-gray-500">{obra.idObra}</div>{searchQuery && <div className="text-[10px] text-red-500 mt-1">{obra.cliente} - {obra.encargado}</div>}</td>
                             <td className="px-6 py-4 font-bold text-gray-900">{Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
