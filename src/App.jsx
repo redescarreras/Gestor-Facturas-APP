@@ -807,7 +807,22 @@ export default function App() {
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="Nombre Obra"><textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
                 <InputGroup label="Cliente"><select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}><option value="">Seleccionar...</option>{config.empresas?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                <InputGroup label="Zona / Central"><select required className="input-field" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})}><option value="">Seleccionar...</option>{config.centrales?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
+                <InputGroup label="Zona / Central">
+                   <input 
+                      list="centrales-datalist" 
+                      required 
+                      className="input-field bg-white" 
+                      value={formData.central} 
+                      onChange={e => setFormData({...formData, central: e.target.value})} 
+                      placeholder="Escribe para buscar..." 
+                      autoComplete="off" 
+                   />
+                   <datalist id="centrales-datalist">
+                     {[...(config.centrales || [])]
+                        .sort((a, b) => a.localeCompare(b, 'es'))
+                        .map(op => <option key={op} value={op} />)}
+                   </datalist>
+                </InputGroup>
               </div>
               <div className="space-y-4 md:col-span-1">
                 <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
