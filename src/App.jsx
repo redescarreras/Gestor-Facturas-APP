@@ -155,10 +155,7 @@ export default function App() {
   // --- LÓGICA DE NEGOCIO ---
   const handleSaveObra = async (e) => {
     e.preventDefault();
-    if (!user) { 
-      showToast("Esperando conexión...", "info"); 
-      return; 
-    }
+    if (!user) { showToast("Esperando conexión...", "info"); return; }
 
     const obraData = {
       ...formData,
@@ -243,7 +240,7 @@ export default function App() {
       showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
       console.error("Error al cerrar ciclo:", error);
-      showToast("Error al procesar el cierre. Verifica la consola.", "error");
+      showToast("Error al procesar el cierre.", "error");
     }
   };
 
@@ -264,6 +261,32 @@ export default function App() {
     } catch (error) {
       console.error(error);
       showToast("Error al actualizar factura", "error");
+    }
+  };
+
+  const handleUpdateImporteCiclo = async (obraId, currentImporte) => {
+    const nuevoImporteStr = prompt("Modificar Importe Base (€):", currentImporte || "0");
+    if (nuevoImporteStr === null) return;
+
+    const parseado = parseFloat(nuevoImporteStr.replace(',', '.'));
+    if (isNaN(parseado)) {
+      showToast("Importe no válido", "error");
+      return;
+    }
+
+    try {
+      const updatedObrasCiclo = (viewCiclo.obras || []).map(o => 
+        o.id === obraId ? { ...o, importe: parseado } : o
+      );
+      
+      await updateDoc(doc(db, "ciclos", viewCiclo.id), { obras: updatedObrasCiclo });
+      await updateDoc(doc(db, "obras", obraId), { importe: parseado });
+
+      setViewCiclo({ ...viewCiclo, obras: updatedObrasCiclo });
+      showToast("Importe modificado exitosamente", "success");
+    } catch (error) {
+      console.error(error);
+      showToast("Error al actualizar importe", "error");
     }
   };
 
@@ -292,9 +315,7 @@ export default function App() {
     setConfig(prev => ({ ...prev, [type]: newList }));
     try {
       await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList });
-    } catch (error) { 
-      showToast("Error config", 'error'); 
-    }
+    } catch (error) { showToast("Error config", 'error'); }
   };
 
   const handleExportBackup = () => {
@@ -324,9 +345,7 @@ export default function App() {
            else await addDoc(collection(db, "obras"), item);
         }
         showToast(`Completado`, "success");
-      } catch (error) { 
-        showToast("Archivo inválido", "error"); 
-      }
+      } catch (error) { showToast("Archivo inválido", "error"); }
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -647,10 +666,7 @@ export default function App() {
                   <option value="Todas">Todas las Empresas</option>
                   {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
-                <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}>
-                  <option value="Todos">Todos los Encargados</option>
-                  {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
+                <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                 <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg">
                   <Download size={16} /> Imprimir / PDF
                 </button>
@@ -797,6 +813,10 @@ export default function App() {
                     <option value="Todas">Todas</option>
                     {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
                   </select>
+                  <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}>
+                    <option value="Todos">Todos los Encargados</option>
+                    {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
+                  </select>
                   <button onClick={handlePrint} className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black">
                     <Download size={16} /> Descargar PDF
                   </button>
@@ -808,12 +828,12 @@ export default function App() {
                 <p className="text-sm font-medium text-gray-500">Cierre Oficial</p>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className={`grid grid-cols-2 ${isEncargadoFilter ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4`}>
                 <ReportCard title="Base Imponible" amount={totales.base} color="text-gray-900" />
-                <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />
+                {!isEncargadoFilter && <ReportCard title="Total IVA (21%)" amount={totales.iva} color="text-blue-600" />}
                 <ReportCard title="Plus (5%)" amount={totales.plus} color="text-blue-700" />
                 <ReportCard title="Total (Base + Plus)" amount={totales.totalBasePlus} color="text-purple-700" />
-                <ReportCard title="TOTAL FACTURACIÓN" amount={totales.totalConIva} color="text-red-600" isBold />
+                <ReportCard title="TOTAL FACTURACIÓN" amount={isEncargadoFilter ? totales.totalBasePlus : totales.totalConIva} color="text-red-600" isBold />
               </div>
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen">
@@ -841,17 +861,25 @@ export default function App() {
                           <p className="text-gray-400 text-xs">Base</p>
                           <p className="font-medium">{data.base.toLocaleString()} €</p>
                         </div>
-                        <div className="w-20">
-                          <p className="text-gray-400 text-xs">IVA</p>
-                          <p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p>
-                        </div>
+                        {!isEncargadoFilter && (
+                          <div className="w-20">
+                            <p className="text-gray-400 text-xs">IVA</p>
+                            <p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p>
+                          </div>
+                        )}
                         <div className="w-20">
                           <p className="text-gray-400 text-xs">Plus</p>
                           <p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p>
                         </div>
+                        {data.uuii > 0 && (
+                          <div className="w-20">
+                            <p className="text-gray-400 text-xs">UUII</p>
+                            <p className="font-medium text-purple-600">{data.uuii.toLocaleString()} €</p>
+                          </div>
+                        )}
                         <div className="w-24">
                           <p className="text-gray-400 text-xs font-bold">Total</p>
-                          <p className="font-bold text-green-700 text-lg">{(data.base + data.iva + data.plus + data.uuii).toLocaleString()} €</p>
+                          <p className="font-bold text-green-700 text-lg">{(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString()} €</p>
                         </div>
                       </div>
                     </div>
@@ -871,6 +899,7 @@ export default function App() {
                          <th className="py-2 px-2">Obra</th>
                          <th className="py-2 px-2">Encargado</th>
                          <th className="py-2 px-2">Observaciones</th>
+                         <th className="py-2 px-2 text-right">Base</th>
                          <th className="py-2 px-2 text-right">Total 5% Incl.</th>
                        </tr>
                      </thead>
@@ -894,7 +923,15 @@ export default function App() {
                              <td className="py-1 px-2">{o.nombre}</td>
                              <td className="py-1 px-2 font-medium text-gray-700">{o.encargado}</td>
                              <td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td>
-                             <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString()} €</td>
+                             <td className="py-1 px-2 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                   <span className="font-medium">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                                   <button onClick={() => handleUpdateImporteCiclo(o.id, o.importe)} className="text-blue-600 hover:text-blue-800 p-1 no-print">
+                                     <Edit size={12}/>
+                                   </button>
+                                </div>
+                             </td>
+                             <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                            </tr>
                          )
                        })}
