@@ -6,7 +6,7 @@ import {
   Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
   FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database, CalendarRange,
   History, Lock, FileInput, Receipt, CheckSquare, FileSpreadsheet,
-  PiggyBank
+  PiggyBank, RefreshCw
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -78,6 +78,7 @@ export default function App() {
   const [selectedForInvoice, setSelectedForInvoice] = useState([]);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
+  const [editingFactura, setEditingFactura] = useState(null);
 
   // ESTADO NUEVO: MÓDULO RETENCIONES
   const [retencionesFilter, setRetencionesFilter] = useState('Todas');
@@ -336,6 +337,75 @@ export default function App() {
       window.print();
       setInvoiceToPrint(null);
     }, 500);
+  };
+
+  const handleSyncOldInvoices = async () => {
+    if (!user) return showToast("Esperando conexión...", "info");
+    if (!confirm("¿Generar facturas oficiales y retenciones para expedientes de ciclos antiguos que ya tengan asignado un Nº Factura manual?")) return;
+
+    showToast("Sincronizando expedientes...", "info");
+    const existingFacturaNums = new Set(facturas.map(f => f.numFactura));
+    const newFacturasMap = {};
+
+    ciclos.forEach(ciclo => {
+      if (ciclo.obras && Array.isArray(ciclo.obras)) {
+        ciclo.obras.forEach(obra => {
+          if (obra.numFactura && !existingFacturaNums.has(obra.numFactura)) {
+            if (!newFacturasMap[obra.numFactura]) {
+              let clienteData = { nombre: obra.cliente || 'CLIENTE SIN ASIGNAR', cif: 'Desconocido', direccion: 'Desconocida' };
+              const clienteConfig = config.empresasFacturacion?.find(c => c.nombre.toLowerCase().includes((obra.cliente||'').toLowerCase()));
+              if (clienteConfig) clienteData = clienteConfig;
+
+              newFacturasMap[obra.numFactura] = {
+                numFactura: obra.numFactura,
+                fecha: ciclo.fecha.split('T')[0],
+                contrato: obra.contrato || '',
+                pedido: '',
+                cliente: clienteData,
+                obras: [],
+                subtotal: 0,
+                retencion: 0,
+                retencionSolicitada: false,
+                prontoPago: 0,
+                iva: 0,
+                total: 0,
+                formaPago: 'CONFIRMING A 120 DÍAS',
+                cicloId: ciclo.id,
+                createdAt: new Date().toISOString()
+              };
+            }
+
+            const base = parseFloat(obra.importe) || 0;
+            const totalLinea = base + (obra.tieneRetencion ? base * 0.05 : 0) + ((parseFloat(obra.uuii) || 0) * 1.5);
+            
+            newFacturasMap[obra.numFactura].obras.push({
+              id: obra.id, idCarreras: obra.idCarreras, nombre: obra.nombre, total: totalLinea
+            });
+            newFacturasMap[obra.numFactura].subtotal += totalLinea;
+          }
+        });
+      }
+    });
+
+    const facturasToCreate = Object.values(newFacturasMap);
+    if (facturasToCreate.length === 0) return showToast("No hay facturas antiguas para sincronizar.", "info");
+
+    try {
+      let batch = writeBatch(db);
+      let count = 0;
+      for (const f of facturasToCreate) {
+        f.retencion = f.subtotal * 0.05; 
+        f.iva = f.subtotal * 0.21;
+        f.total = f.subtotal - f.retencion + f.iva;
+
+        batch.set(doc(collection(db, "facturas")), f);
+        if (++count >= 400) { await batch.commit(); batch = writeBatch(db); count = 0; }
+      }
+      if (count > 0) await batch.commit();
+      showToast(`¡Sincronización completa! Se crearon ${facturasToCreate.length} facturas.`, "success");
+    } catch (error) {
+      showToast("Error al sincronizar", "error");
+    }
   };
 
   // --- LÓGICA DE RETENCIONES ---
@@ -854,10 +924,10 @@ export default function App() {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <table className="w-full text-sm text-left">
                    <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
-                     <tr><th className="px-6 py-4">Nº Factura</th><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Cliente</th><th className="px-6 py-4">Obras</th><th className="px-6 py-4 text-right">Total Factura</th><th className="px-6 py-4 text-center">Descargar</th></tr>
+                     <tr><th className="px-6 py-4">Nº Factura</th><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Cliente</th><th className="px-6 py-4">Obras</th><th className="px-6 py-4 text-right">Total Factura</th><th className="px-6 py-4 text-center">Acciones</th></tr>
                    </thead>
                    <tbody className="divide-y divide-gray-100">
-                     {facturas.length === 0 && <tr><td colSpan="6" className="text-center py-8 text-gray-400">No hay facturas emitidas todavía. Genera una desde un Cierre de Ciclo.</td></tr>}
+                     {facturas.length === 0 && <tr><td colSpan="6" className="text-center py-8 text-gray-400">No hay facturas emitidas todavía. Genera una desde un Cierre de Ciclo o sincroniza las antiguas en Ajustes.</td></tr>}
                      {facturas.map(f => (
                        <tr key={f.id} className="hover:bg-red-50/30 transition-colors group">
                          <td className="px-6 py-4 font-bold text-red-600">{f.numFactura}</td>
@@ -866,7 +936,10 @@ export default function App() {
                          <td className="px-6 py-4 text-gray-500">{f.obras.length} expedientes</td>
                          <td className="px-6 py-4 text-right font-black text-gray-900">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                          <td className="px-6 py-4 text-center">
-                           <button onClick={() => printSpecificInvoice(f)} className="inline-flex items-center justify-center bg-gray-900 text-white p-2 rounded hover:bg-red-600 transition-colors"><Printer size={16} /></button>
+                           <div className="flex justify-center gap-2">
+                             <button onClick={() => setEditingFactura(f)} className="inline-flex items-center justify-center bg-blue-100 text-blue-700 p-2 rounded hover:bg-blue-200 transition-colors" title="Editar Factura"><Edit size={16} /></button>
+                             <button onClick={() => printSpecificInvoice(f)} className="inline-flex items-center justify-center bg-gray-900 text-white p-2 rounded hover:bg-red-600 transition-colors" title="Imprimir"><Printer size={16} /></button>
+                           </div>
                          </td>
                        </tr>
                      ))}
@@ -1059,9 +1132,12 @@ export default function App() {
           {activeTab === 'ajustes' && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-10">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="bg-blue-50 px-6 py-4 border-b border-blue-100">
-                  <h3 className="font-bold text-blue-800 flex items-center gap-2"><Database size={18}/> Copia de Seguridad y Datos</h3>
-                  <p className="text-xs text-blue-600 mt-1">Exporta tus datos para guardarlos en tu ordenador o importa una copia anterior.</p>
+                <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-blue-800 flex items-center gap-2"><Database size={18}/> Copia de Seguridad y Sincronización</h3>
+                    <p className="text-xs text-blue-600 mt-1">Exporta tus datos, importa copias o genera facturas masivamente del histórico.</p>
+                  </div>
+                  <button onClick={handleSyncOldInvoices} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"><RefreshCw size={16}/> Sincronizar Facturas Antiguas</button>
                 </div>
                 <div className="p-6 flex flex-col md:flex-row gap-6 items-center">
                   <div className="flex-1 w-full"><button onClick={handleExportBackup} className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"><Download size={32} className="text-gray-400 group-hover:text-blue-600 mb-2"/><span className="font-bold text-gray-700 group-hover:text-blue-700">Exportar Datos</span><span className="text-xs text-gray-400 mt-1">Descargar archivo .JSON</span></button></div>
@@ -1310,6 +1386,74 @@ export default function App() {
               <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
               <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDICIÓN DE FACTURAS */}
+      {editingFactura && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-bold flex items-center gap-2"><Edit size={20}/> Editar Factura {editingFactura.numFactura}</h3>
+              <button onClick={() => setEditingFactura(null)}><X className="text-gray-400 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await updateDoc(doc(db, "facturas", editingFactura.id), {
+                  fecha: editingFactura.fecha,
+                  contrato: editingFactura.contrato || '',
+                  pedido: editingFactura.pedido || '',
+                  cliente: editingFactura.cliente
+                });
+                showToast("Factura actualizada con éxito", "success");
+                setEditingFactura(null);
+              } catch(err) {
+                showToast("Error al guardar cambios", "error");
+              }
+            }} className="p-6 overflow-y-auto flex flex-col gap-6">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Fecha Emisión *">
+                  <input type="date" required className="input-field" value={editingFactura.fecha} onChange={e => setEditingFactura({...editingFactura, fecha: e.target.value})} />
+                </InputGroup>
+                <InputGroup label="Cambiar Cliente Fiscal">
+                  <select className="input-field border-gray-300 font-bold" 
+                    value={config.empresasFacturacion?.findIndex(c => c.cif === editingFactura.cliente.cif) >= 0 ? config.empresasFacturacion?.findIndex(c => c.cif === editingFactura.cliente.cif) : -1}
+                    onChange={e => {
+                      if(e.target.value !== "-1") setEditingFactura({...editingFactura, cliente: config.empresasFacturacion[e.target.value]});
+                    }}>
+                    <option value={-1} disabled>-- Cliente Genérico --</option>
+                    {config.empresasFacturacion?.map((emp, i) => (
+                      <option key={i} value={i}>{emp.nombre}</option>
+                    ))}
+                  </select>
+                </InputGroup>
+              </div>
+
+              <div className="bg-gray-50 p-4 border border-gray-200 rounded-lg text-xs text-gray-600">
+                <p className="font-bold text-gray-900 mb-1">Cliente actual en factura:</p>
+                <p><strong>{editingFactura.cliente.nombre}</strong></p>
+                <p>CIF: {editingFactura.cliente.cif}</p>
+                <p className="whitespace-pre-line leading-tight mt-1">{editingFactura.cliente.direccion}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Nº Contrato">
+                  <input className="input-field" value={editingFactura.contrato || ''} onChange={e => setEditingFactura({...editingFactura, contrato: e.target.value})} placeholder="Opcional..." />
+                </InputGroup>
+                <InputGroup label="Nº Pedido">
+                  <input className="input-field" value={editingFactura.pedido || ''} onChange={e => setEditingFactura({...editingFactura, pedido: e.target.value})} placeholder="Opcional..." />
+                </InputGroup>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-2">
+                <button type="button" onClick={() => setEditingFactura(null)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-blue-200 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all"><Save size={18}/> Guardar Cambios</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
