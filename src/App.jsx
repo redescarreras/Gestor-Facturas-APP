@@ -5,7 +5,8 @@ import {
   ChevronRight, PieChart, Users, Building, MapPin, Menu, Printer,
   Filter, AlertCircle, Save, Edit, MoreVertical, Download, Loader2,
   FolderOpen, ArrowLeft, Home, WifiOff, Upload, Database, CalendarRange,
-  History, Lock, FileInput, Receipt, CheckSquare, FileSpreadsheet
+  History, Lock, FileInput, Receipt, CheckSquare, FileSpreadsheet,
+  PiggyBank
 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -61,7 +62,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('panel');
   const [obras, setObras] = useState([]);
   const [ciclos, setCiclos] = useState([]);
-  const [facturas, setFacturas] = useState([]); // ESTADO DE FACTURAS
+  const [facturas, setFacturas] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -73,10 +74,13 @@ export default function App() {
   const [confirmCierre, setConfirmCierre] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
-  // ESTADOS NUEVOS: MÓDULO FACTURAS
+  // ESTADOS MÓDULO FACTURAS
   const [selectedForInvoice, setSelectedForInvoice] = useState([]);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
+
+  // ESTADO NUEVO: MÓDULO RETENCIONES
+  const [retencionesFilter, setRetencionesFilter] = useState('Todas');
 
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientData, setNewClientData] = useState({ nombre: '', cif: '', direccion: '' });
@@ -248,7 +252,6 @@ export default function App() {
     }
   };
 
-  // Cálculo de Subtotal para Factura en vivo
   const subtotalFactura = useMemo(() => {
     if (!viewCiclo || selectedForInvoice.length === 0) return 0;
     return selectedForInvoice.reduce((sum, id) => {
@@ -268,13 +271,11 @@ export default function App() {
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
     
-    // Cálculos
     const retencionAmount = invoiceForm.retencion ? subtotalFactura * 0.05 : 0;
     const prontoPagoAmount = invoiceForm.prontoPago ? subtotalFactura * 0.05 : 0;
     const ivaAmount = subtotalFactura * 0.21;
     const totalAmount = subtotalFactura - retencionAmount - prontoPagoAmount + ivaAmount;
 
-    // Obtener las obras seleccionadas con sus datos calculados
     const obrasDetalle = selectedForInvoice.map(id => {
       const o = viewCiclo.obras.find(x => x.id === id);
       const base = parseFloat(o.importe) || 0;
@@ -291,6 +292,7 @@ export default function App() {
       obras: obrasDetalle,
       subtotal: subtotalFactura,
       retencion: retencionAmount,
+      retencionSolicitada: false, // Por defecto no está solicitada
       prontoPago: prontoPagoAmount,
       iva: ivaAmount,
       total: totalAmount,
@@ -300,10 +302,8 @@ export default function App() {
     };
 
     try {
-      // 1. Guardar factura
       await addDoc(collection(db, "facturas"), facturaDoc);
 
-      // 2. Actualizar obras y ciclo original con el numFactura
       let batch = writeBatch(db);
       selectedForInvoice.forEach(obraId => {
         batch.update(doc(db, "obras", obraId), { numFactura: invoiceForm.numFactura });
@@ -318,11 +318,11 @@ export default function App() {
 
       setInvoiceModalOpen(false);
       setSelectedForInvoice([]);
-      setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); // update local view
+      setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); 
       
       setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPago: false });
       showToast("Factura generada y asignada con éxito", "success");
-      setActiveTab('facturas'); // Redirigir a facturas
+      setActiveTab('facturas'); 
       
     } catch (error) {
       console.error(error);
@@ -337,6 +337,48 @@ export default function App() {
       setInvoiceToPrint(null);
     }, 500);
   };
+
+  // --- LÓGICA DE RETENCIONES ---
+  const retencionesData = useMemo(() => {
+    return facturas
+      .filter(f => f.retencion > 0)
+      .map(f => {
+        // Calcular fecha 1 año después de forma segura para evitar problemas de Timezone
+        const parts = f.fecha.split('-'); // [YYYY, MM, DD]
+        const fechaElegibleStr = `${parseInt(parts[0]) + 1}-${parts[1]}-${parts[2]}`;
+        
+        const hoy = new Date().toISOString().split('T')[0];
+
+        let estadoRetencion = 'en_espera';
+        if (f.retencionSolicitada) {
+          estadoRetencion = 'solicitada';
+        } else if (hoy >= fechaElegibleStr) {
+          estadoRetencion = 'pendiente_solicitar';
+        }
+
+        return { ...f, fechaElegibleStr, estadoRetencion };
+      })
+      .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+  }, [facturas]);
+
+  const retencionesFiltradas = useMemo(() => {
+    if (retencionesFilter === 'Todas') return retencionesData;
+    return retencionesData.filter(r => r.estadoRetencion === retencionesFilter);
+  }, [retencionesData, retencionesFilter]);
+
+  const handleMarcarRetencion = async (id) => {
+    if (!confirm("¿Confirmas que ya has reclamado el cobro de esta retención?")) return;
+    try {
+      await updateDoc(doc(db, "facturas", id), { 
+        retencionSolicitada: true,
+        fechaSolicitudRetencion: new Date().toISOString()
+      });
+      showToast("Retención marcada como Solicitada", "success");
+    } catch (error) {
+      showToast("Error al actualizar la retención", "error");
+    }
+  };
+  // -----------------------------
 
   const handleUpdateFacturaCiclo = async (obraId, currentFactura) => {
     const nuevaFactura = prompt("Asignar Nº Factura Manualmente:", currentFactura || "");
@@ -503,26 +545,16 @@ export default function App() {
     <div className="min-h-screen bg-gray-100 font-sans text-gray-900 flex flex-col md:flex-row print:bg-white relative">
       <Toast show={notification.show} message={notification.message} type={notification.type} onClose={() => setNotification({ ...notification, show: false })} />
 
-      {/* Estilos CSS adaptados para que convivan el Print Normal y el de la Factura */}
       <style>{`
         @media print {
-          /* Reset general márgenes para evitar URLs automáticas si es factura */
           @page { margin: ${invoiceToPrint ? '0' : 'auto'}; } 
-          
-          /* Ocultar la app base si estamos imprimiendo una factura */
           .hide-on-invoice-print { display: ${invoiceToPrint ? 'none !important' : 'block'}; }
-          
-          /* Ocultar elementos UI habituales */
           aside, header, .no-print, .fab-button, .modal-overlay, button, .input-filter { display: none !important; }
-          
           main { margin: 0 !important; padding: ${invoiceToPrint ? '0' : '20px'} !important; overflow: visible !important; height: auto !important; width: 100% !important; background: white !important; }
           body { background: white !important; font-size: 11px; color: black; }
-          
           .print-header { display: ${invoiceToPrint ? 'none !important' : 'flex !important'}; margin-bottom: 30px; border-bottom: 2px solid #cc0000; padding-bottom: 15px; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
           .card-resumen { border: 1px solid #ddd !important; box-shadow: none !important; margin-bottom: 15px; page-break-inside: avoid; }
           .break-page { page-break-before: always; }
-          
-          /* Estilos específicos de la factura */
           .invoice-wrapper { display: ${invoiceToPrint ? 'block !important' : 'none'}; padding: 15mm; width: 100%; box-sizing: border-box; }
           .invoice-table th, .invoice-table td { padding: 8px; border: 1px solid #ddd; text-align: left; }
           .invoice-table th { background-color: #f8f9fa !important; font-weight: bold; }
@@ -533,16 +565,12 @@ export default function App() {
       {/* PLANTILLA DE FACTURA PARA IMPRESIÓN */}
       {invoiceToPrint && (
         <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50">
-          {/* Cabecera */}
           <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
             <div>
               <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REDES CARRERAS S.L.</h1>
               <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">Telecomunicaciones</p>
             </div>
-            {/* Optional: Puedes poner aquí el logo en img */}
           </div>
-
-          {/* Datos Empresa y Cliente */}
           <div className="flex justify-between mb-10 text-sm">
             <div className="w-5/12">
               <h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Empresa</h3>
@@ -560,16 +588,12 @@ export default function App() {
               <p className="whitespace-pre-line leading-relaxed">{invoiceToPrint.cliente.direccion}</p>
             </div>
           </div>
-
-          {/* Bloque Identificación Factura */}
           <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-2 gap-y-3 border border-gray-200 text-sm">
             {invoiceToPrint.contrato && <p><span className="font-bold text-gray-600">N.º DE CONTRATO:</span> <span className="font-medium">{invoiceToPrint.contrato}</span></p>}
             {invoiceToPrint.pedido && <p><span className="font-bold text-gray-600">N.º DE PEDIDO:</span> <span className="font-medium">{invoiceToPrint.pedido}</span></p>}
             <p><span className="font-bold text-gray-600">FACTURA N.º:</span> <span className="font-black text-lg text-red-600 ml-2">{invoiceToPrint.numFactura}</span></p>
-            <p><span className="font-bold text-gray-600">Fecha de Emisión:</span> <span className="font-medium">{new Date(invoiceToPrint.fecha).toLocaleDateString('es-ES', {day: '2-digit', month: 'long', year: 'numeric'})}</span></p>
+            <p><span className="font-bold text-gray-600">Fecha de Emisión:</span> <span className="font-medium">{new Date(invoiceToPrint.fecha).toLocaleDateString('es-ES')}</span></p>
           </div>
-
-          {/* Tabla de Conceptos */}
           <table className="w-full invoice-table mb-10 text-sm border-collapse">
             <thead>
               <tr>
@@ -591,45 +615,37 @@ export default function App() {
               ))}
             </tbody>
           </table>
-
-          {/* Totales */}
           <div className="flex justify-end mb-10">
             <div className="w-72 bg-gray-50/50 border border-gray-300 p-4 rounded-lg text-sm">
               <div className="flex justify-between font-bold border-b border-gray-200 pb-2 mb-3">
                 <span className="text-gray-600">TOTAL BASE IMPONIBLE:</span>
                 <span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
-              
               {invoiceToPrint.retencion > 0 && (
                 <div className="flex justify-between mb-2 text-red-600 font-medium">
                   <span>5% RETENCIÓN:</span>
                   <span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
-              
               {invoiceToPrint.prontoPago > 0 && (
                 <div className="flex justify-between mb-2 text-blue-600 font-medium">
                   <span>5% PRONTO PAGO:</span>
                   <span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
-
               <div className="flex justify-between mb-3 text-gray-700 font-medium">
                 <span>IVA 21%:</span>
                 <span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
-
               <div className="flex justify-between font-black text-lg border-t-2 border-red-600 pt-3 text-gray-900 mt-2">
                 <span>A COBRAR:</span>
                 <span>{invoiceToPrint.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
             </div>
           </div>
-
           <div className="font-bold border-t-2 border-red-600 pt-4 text-sm text-gray-800">
             <p>FORMA DE PAGO: <span className="font-black ml-2">{invoiceToPrint.formaPago}</span></p>
           </div>
-          
           <p className="text-center text-[10px] text-gray-400 mt-16 pt-4 border-t border-gray-100">
             Factura generada por Sistema de Facturación REDES CARRERAS S.L
           </p>
@@ -646,16 +662,14 @@ export default function App() {
           <NavButton icon={LayoutGrid} label="Panel Principal" active={activeTab === 'panel'} onClick={() => setActiveTab('panel')} />
           <NavButton icon={FileText} label="Reportes" active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} />
           <NavButton icon={History} label="Cierre de Ciclos" active={activeTab === 'cierres'} onClick={() => setActiveTab('cierres')} />
-          {/* NUEVO BOTON FACTURAS */}
           <NavButton icon={Receipt} label="Facturas Emitidas" active={activeTab === 'facturas'} onClick={() => setActiveTab('facturas')} />
+          <NavButton icon={PiggyBank} label="Retenciones" active={activeTab === 'retenciones'} onClick={() => setActiveTab('retenciones')} />
           <NavButton icon={Settings} label="Ajustes" active={activeTab === 'ajustes'} onClick={() => setActiveTab('ajustes')} />
         </nav>
       </aside>
 
       {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative bg-gray-50/50 print:h-auto print:overflow-visible hide-on-invoice-print">
-        
-        {/* CABECERA PDF DE REPORTES/CICLOS */}
         <div className="print-header w-full">
           <div className="flex items-center gap-6">
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
@@ -673,6 +687,7 @@ export default function App() {
             {activeTab === 'reportes' && <><FileText className="text-red-600"/> Reportes Generales</>}
             {activeTab === 'cierres' && <><History className="text-red-600"/> Historial de Cierres</>}
             {activeTab === 'facturas' && <><Receipt className="text-red-600"/> Facturas Emitidas</>}
+            {activeTab === 'retenciones' && <><PiggyBank className="text-red-600"/> Control Retenciones</>}
             {activeTab === 'ajustes' && <><Settings className="text-red-600"/> Ajustes</>}
           </h2>
           <div className="flex items-center gap-4">
@@ -827,7 +842,7 @@ export default function App() {
             </div>
           )}
 
-          {/* VISTA NUEVA: FACTURAS EMITIDAS */}
+          {/* VISTA FACTURAS EMITIDAS */}
           {activeTab === 'facturas' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="flex justify-between items-center no-print">
@@ -861,13 +876,95 @@ export default function App() {
             </div>
           )}
 
+          {/* VISTA NUEVA: RETENCIONES */}
+          {activeTab === 'retenciones' && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="flex justify-between items-center no-print">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Control de Retenciones (5%)</h3>
+                  <p className="text-sm text-gray-500">Gestiona y reclama las retenciones de facturas emitidas (disponibles 1 año después).</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
+                <div className="flex items-center gap-2 text-gray-500 font-bold text-sm mr-2"><Filter size={18} /> FILTRAR ESTADO:</div>
+                <select className="input-filter bg-white" value={retencionesFilter} onChange={(e) => setRetencionesFilter(e.target.value)}>
+                  <option value="Todas">Todas las Retenciones</option>
+                  <option value="solicitada">🟢 Solicitadas / Cobradas</option>
+                  <option value="pendiente_solicitar">🔴 Pendientes de Solicitar (Ya elegibles)</option>
+                  <option value="en_espera">🟡 En Espera (Menos de 1 año)</option>
+                </select>
+                <button onClick={handlePrint} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-black transition shadow-lg">
+                  <Download size={16} /> Imprimir / PDF
+                </button>
+              </div>
+
+              {/* TARJETAS RESUMEN DE RETENCIONES */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
+                <ReportCard title="Total Retenido Histórico" amount={retencionesData.reduce((acc, r) => acc + r.retencion, 0)} color="text-gray-900" />
+                <ReportCard title="Total En Espera" amount={retencionesData.filter(r => r.estadoRetencion === 'en_espera').reduce((acc, r) => acc + r.retencion, 0)} color="text-yellow-600" />
+                <ReportCard title="Reclamable AHORA" amount={retencionesData.filter(r => r.estadoRetencion === 'pendiente_solicitar').reduce((acc, r) => acc + r.retencion, 0)} color="text-red-600" isBold />
+                <ReportCard title="Total Solicitado / Cobrado" amount={retencionesData.filter(r => r.estadoRetencion === 'solicitada').reduce((acc, r) => acc + r.retencion, 0)} color="text-green-600" />
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden card-resumen">
+                <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2 p-6 print:block hidden">
+                  Informe de Retenciones - {retencionesFilter.replace('_', ' ').toUpperCase()}
+                </h3>
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 uppercase text-xs">
+                    <tr>
+                      <th className="px-6 py-4">Nº Factura</th>
+                      <th className="px-6 py-4">Fecha Factura</th>
+                      <th className="px-6 py-4">Cliente</th>
+                      <th className="px-6 py-4 bg-gray-100">Reclamable Desde</th>
+                      <th className="px-6 py-4 text-right">Retención (5%)</th>
+                      <th className="px-6 py-4 text-center">Estado</th>
+                      <th className="px-6 py-4 text-center no-print">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {retencionesFiltradas.length === 0 && (
+                      <tr><td colSpan="7" className="text-center py-8 text-gray-400">No hay retenciones en esta categoría.</td></tr>
+                    )}
+                    {retencionesFiltradas.map(r => (
+                      <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 font-bold text-gray-900">{r.numFactura}</td>
+                        <td className="px-6 py-4 text-gray-500">{new Date(r.fecha).toLocaleDateString()}</td>
+                        <td className="px-6 py-4 font-medium text-gray-700">{r.cliente.nombre}</td>
+                        <td className="px-6 py-4 font-mono font-bold text-gray-800 bg-gray-50/50">{new Date(r.fechaElegibleStr).toLocaleDateString()}</td>
+                        <td className="px-6 py-4 text-right font-bold text-red-600">{r.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                        <td className="px-6 py-4 text-center">
+                          {r.estadoRetencion === 'solicitada' && <span className="bg-green-100 text-green-700 border border-green-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider">Solicitada</span>}
+                          {r.estadoRetencion === 'pendiente_solicitar' && <span className="bg-red-100 text-red-700 border border-red-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider shadow-sm animate-pulse">Pendiente</span>}
+                          {r.estadoRetencion === 'en_espera' && <span className="bg-yellow-100 text-yellow-700 border border-yellow-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider">En Espera</span>}
+                        </td>
+                        <td className="px-6 py-4 text-center no-print">
+                          {r.estadoRetencion === 'pendiente_solicitar' ? (
+                            <button onClick={() => handleMarcarRetencion(r.id)} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95 whitespace-nowrap">
+                              ¡Reclamar Ya!
+                            </button>
+                          ) : r.estadoRetencion === 'solicitada' ? (
+                            <CheckCircle size={24} className="mx-auto text-green-500"/>
+                          ) : (
+                            <Lock size={20} className="mx-auto text-gray-300" />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* VISTA 3: CIERRE DE CICLOS */}
           {activeTab === 'cierres' && !viewCiclo && (
             <div className="space-y-6 animate-in fade-in">
               <div className="flex justify-between items-center no-print">
                 <div>
                   <h3 className="text-xl font-bold text-gray-800">Historial de Ciclos</h3>
-                  <p className="text-sm text-gray-500">Consulta los cierres pasados y genera Facturas de cobro oficiales.</p>
+                  <p className="text-sm text-gray-500">Consulta los cierres pasados o genera uno nuevo.</p>
                 </div>
                 <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
                   <Lock size={18} /> Cerrar Ciclo Actual
@@ -886,7 +983,6 @@ export default function App() {
             </div>
           )}
 
-          {/* VISTA 3.1: DETALLE DE UN CICLO (CON CHECKBOX PARA FACTURAR) */}
           {activeTab === 'cierres' && viewCiclo && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
@@ -895,14 +991,7 @@ export default function App() {
                   <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                   <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                   <button onClick={handlePrint} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-200 font-bold"><Printer size={16} /> Imprimir Lote</button>
-                  {/* BOTÓN NUEVO GENERAR FACTURA */}
-                  <button 
-                    disabled={selectedForInvoice.length === 0} 
-                    onClick={() => setInvoiceModalOpen(true)}
-                    className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
-                  >
-                    <FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})
-                  </button>
+                  <button disabled={selectedForInvoice.length === 0} onClick={() => setInvoiceModalOpen(true)} className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})</button>
                 </div>
               </div>
 
@@ -911,7 +1000,6 @@ export default function App() {
                 <p className="text-sm font-medium text-gray-500">Gestión de Cobro</p>
               </div>
 
-              {/* LISTA DETALLADA DEL CICLO CON EDITAR FACTURA Y CHECKBOX */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
                    <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Expedientes disponibles para Facturar</h3>
                    <table className="w-full text-xs text-left">
@@ -933,7 +1021,7 @@ export default function App() {
                          const plus = o.tieneRetencion ? base * 0.05 : 0;
                          const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
                          const totalFila = base + plus + uuiiVal;
-                         const isFacturado = !!o.numFactura; // Si ya tiene num de factura no se puede volver a facturar
+                         const isFacturado = !!o.numFactura;
 
                          return (
                            <tr key={o.id} className={`border-b border-gray-50 ${isFacturado ? 'bg-gray-50' : 'hover:bg-red-50'}`}>
@@ -941,15 +1029,7 @@ export default function App() {
                                {isFacturado ? (
                                  <span className="text-[9px] font-bold text-green-600 block leading-tight">YA<br/>EMITIDA</span>
                                ) : (
-                                 <input 
-                                   type="checkbox" 
-                                   className="w-4 h-4 text-red-600 rounded cursor-pointer"
-                                   checked={selectedForInvoice.includes(o.id)}
-                                   onChange={(e) => {
-                                      if (e.target.checked) setSelectedForInvoice([...selectedForInvoice, o.id]);
-                                      else setSelectedForInvoice(selectedForInvoice.filter(id => id !== o.id));
-                                   }}
-                                 />
+                                 <input type="checkbox" className="w-4 h-4 text-red-600 rounded cursor-pointer" checked={selectedForInvoice.includes(o.id)} onChange={(e) => { if (e.target.checked) setSelectedForInvoice([...selectedForInvoice, o.id]); else setSelectedForInvoice(selectedForInvoice.filter(id => id !== o.id)); }} />
                                )}
                              </td>
                              <td className="py-1 px-2 text-gray-500">{new Date(o.fecha).toLocaleDateString()}</td>
@@ -988,6 +1068,7 @@ export default function App() {
                   <div className="flex-1 w-full relative"><input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" /><div className="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group"><Upload size={32} className="text-gray-400 group-hover:text-green-600 mb-2"/><span className="font-bold text-gray-700 group-hover:text-green-700">Importar Datos</span><span className="text-xs text-gray-400 mt-1">Subir archivo .JSON</span></div></div>
                 </div>
               </div>
+
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Settings size={18}/> Listas Desplegables</h3>
@@ -1001,7 +1082,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SECCIÓN NUEVA: EMPRESAS PARA FACTURAR */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-8">
                 <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex justify-between items-center">
                   <div>
@@ -1056,7 +1136,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
             </div>
           )}
         </div>
@@ -1075,7 +1154,6 @@ export default function App() {
             </div>
             
             <form onSubmit={handleCreateFactura} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
-              {/* CABECERA FACTURA */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                 <div className="space-y-4">
                   <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
@@ -1106,9 +1184,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* OPCIONES DE COBRO Y RESUMEN MATEMÁTICO */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                 {/* Opciones de Descuento / Pago */}
                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
                    <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
                    <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
@@ -1129,7 +1205,6 @@ export default function App() {
                    </InputGroup>
                  </div>
 
-                 {/* Pantalla de Cálculos Reales de Factura */}
                  <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
                     <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
                     <div className="space-y-3 font-mono text-sm">
@@ -1137,26 +1212,22 @@ export default function App() {
                         <span>TOTAL BASE IMPONIBLE:</span>
                         <span className="font-bold text-white text-lg">{subtotalFactura.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
-                      
                       {invoiceForm.retencion && (
                         <div className="flex justify-between items-center text-red-400">
                           <span>5% RETENCIÓN:</span>
                           <span>-{(subtotalFactura * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                         </div>
                       )}
-                      
                       {invoiceForm.prontoPago && (
                         <div className="flex justify-between items-center text-blue-400">
                           <span>5% PRONTO PAGO:</span>
                           <span>-{(subtotalFactura * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                         </div>
                       )}
-
                       <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3">
                         <span>IVA 21%:</span>
                         <span>{(subtotalFactura * 0.21).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
-
                       <div className="flex justify-between items-center pt-2 text-green-400">
                         <span className="font-black text-lg">A COBRAR:</span>
                         <span className="font-black text-2xl">
@@ -1166,7 +1237,6 @@ export default function App() {
                     </div>
                  </div>
               </div>
-
               <div className="pt-4 flex justify-between items-center border-t border-gray-200">
                 <p className="text-xs text-gray-500 italic">* Revisa que el Nº Factura no exista previamente. Esta acción es irreversible.</p>
                 <div className="flex gap-3">
@@ -1179,8 +1249,7 @@ export default function App() {
         </div>
       )}
 
-      {}
-      {/* MODAL FORMULARIO OBRAS (MANTENIDO INTACTO) */}
+      {/* MODAL FORMULARIO OBRAS */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
           <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -1188,7 +1257,6 @@ export default function App() {
               <h3 className="text-lg font-bold">{editingObra ? 'Editar Expediente' : 'Añadir Obra'}</h3>
               <button onClick={() => setModalOpen(false)}><X className="text-gray-400 hover:text-white"/></button>
             </div>
-            
             <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="ID Carreras"><input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" /></InputGroup>
@@ -1199,13 +1267,16 @@ export default function App() {
               <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
                 <InputGroup label="Nombre Obra"><textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
                 <InputGroup label="Cliente"><select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}><option value="">Seleccionar...</option>{config.empresas?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                <InputGroup label="Zona / Central"><input list="centrales-datalist" required className="input-field bg-white" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})} placeholder="Escribe para buscar..." autoComplete="off" /><datalist id="centrales-datalist">{[...(config.centrales || [])].sort((a, b) => a.localeCompare(b, 'es')).map(op => <option key={op} value={op}></option>)}</datalist></InputGroup>
+                <InputGroup label="Zona / Central">
+                   <input list="centrales-datalist" required className="input-field bg-white" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})} placeholder="Escribe para buscar..." autoComplete="off" />
+                   <datalist id="centrales-datalist">{[...(config.centrales || [])].sort((a, b) => a.localeCompare(b, 'es')).map(op => <option key={op} value={op}></option>)}</datalist>
+                </InputGroup>
               </div>
               <div className="space-y-4 md:col-span-1">
                 <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
                 <InputGroup label="Base Imponible (€)"><input type="number" step="0.01" required className="input-field font-bold text-lg" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} /></InputGroup>
                 <div className="grid grid-cols-2 gap-2">
-                  <InputGroup label="Encargado"><select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}><option value="">Seleccionar...</option>{config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
+                  <InputGroup label="Encargado"><select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}> <option value="">Seleccionar...</option>{config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
                   <InputGroup label="UUII (Viviendas)"><input type="number" className="input-field border-blue-200 bg-blue-50 text-blue-800 font-medium" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="Nº..." /></InputGroup>
                 </div>
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2 shadow-inner">
@@ -1229,13 +1300,12 @@ export default function App() {
         </div>
       )}
 
+      {/* CONFIRMAR CIERRE */}
       {confirmCierre && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
             <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.
-            </p>
+            <p className="text-sm text-gray-600 mb-6">Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.</p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
               <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
@@ -1250,9 +1320,7 @@ export default function App() {
 // --- SUBCOMPONENTES AUXILIARES ---
 function ConfigSection({ title, items = [], onAdd, onDelete }) {
   const [newValue, setNewValue] = useState('');
-  const handleAdd = () => { 
-    if(newValue.trim()) { onAdd(newValue.trim()); setNewValue(''); } 
-  };
+  const handleAdd = () => { if(newValue.trim()) { onAdd(newValue.trim()); setNewValue(''); } };
   return (
     <div>
       <h4 className="font-bold text-gray-700 text-sm mb-3">{title}</h4>
