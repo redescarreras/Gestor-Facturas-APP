@@ -72,6 +72,7 @@ export default function App() {
   const [editingObra, setEditingObra] = useState(null);
   const [viewCiclo, setViewCiclo] = useState(null);
   const [confirmCierre, setConfirmCierre] = useState(false);
+  const [cierreEmpresa, setCierreEmpresa] = useState('Todas'); // NUEVO ESTADO PARA EL CIERRE
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   // ESTADOS MÓDULO FACTURAS
@@ -242,8 +243,11 @@ export default function App() {
 
   const handleCerrarCiclo = async () => {
     if (!user) return;
-    const obrasPendientes = obras.filter(o => o.estado === 'pendiente');
-    if (obrasPendientes.length === 0) return showToast("No hay obras pendientes.", "warning");
+    
+    // FILTRAMOS POR LA EMPRESA SELECCIONADA EN EL MODAL
+    const obrasPendientes = obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa));
+    
+    if (obrasPendientes.length === 0) return showToast(`No hay obras pendientes ${cierreEmpresa !== 'Todas' ? `para ${cierreEmpresa}` : ''}.`, "warning");
 
     setConfirmCierre(false);
     showToast("Cerrando ciclo...", "info");
@@ -257,9 +261,17 @@ export default function App() {
         return clean;
       });
 
-      const nombreCiclo = `Cierre ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'long', year: 'numeric'})}`;
+      // PERSONALIZAMOS EL NOMBRE DEL CICLO
+      const prefix = cierreEmpresa === 'Todas' ? 'Cierre General' : `Cierre ${cierreEmpresa}`;
+      const nombreCiclo = `${prefix} - ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'short', year: 'numeric'})}`;
+      
       const cicloRef = await addDoc(collection(db, "ciclos"), {
-        nombre: nombreCiclo, fecha: new Date().toISOString(), obras: obrasSanitizadas, totalObras: obrasSanitizadas.length, creadoPor: user.uid
+        nombre: nombreCiclo, 
+        fecha: new Date().toISOString(), 
+        obras: obrasSanitizadas, 
+        totalObras: obrasSanitizadas.length, 
+        creadoPor: user.uid,
+        empresaCierre: cierreEmpresa // Guardamos qué empresa se cerró
       });
 
       let batch = writeBatch(db);
@@ -269,6 +281,8 @@ export default function App() {
         if (++count >= 450) { await batch.commit(); batch = writeBatch(db); count = 0; }
       }
       if (count > 0) await batch.commit();
+      
+      setCierreEmpresa('Todas'); // Reseteamos el selector
       showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
       showToast("Error al procesar el cierre.", "error");
@@ -1439,10 +1453,30 @@ export default function App() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
             <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
-            <p className="text-sm text-gray-600 mb-6">Esto archivará todas las obras pendientes como "Facturadas" y reiniciará el contador a 0 para el siguiente ciclo. Se generará un informe histórico.</p>
+            <p className="text-sm text-gray-600 mb-4">Selecciona qué empresa deseas incluir en este cierre. Las obras pendientes pasarán a estado "Facturadas".</p>
+            
+            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 rounded-xl">
+              <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Empresa:</label>
+              <select 
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium"
+                value={cierreEmpresa} 
+                onChange={e => setCierreEmpresa(e.target.value)}
+              >
+                <option value="Todas">Todas las Empresas (Cierre General)</option>
+                {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+              
+              <div className="mt-3 flex justify-between items-center text-sm">
+                <span className="text-gray-500">Expedientes a cerrar:</span>
+                <span className="font-black text-red-600 text-lg">
+                  {obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa)).length}
+                </span>
+              </div>
+            </div>
+
             <div className="flex gap-3">
-              <button onClick={() => setConfirmCierre(false)} className="flex-1 py-2 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
-              <button onClick={handleCerrarCiclo} className="flex-1 py-2 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700">Confirmar Cierre</button>
+              <button onClick={() => { setConfirmCierre(false); setCierreEmpresa('Todas'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
+              <button onClick={handleCerrarCiclo} className="flex-1 py-2.5 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700 transition-colors">Confirmar Cierre</button>
             </div>
           </div>
         </div>
