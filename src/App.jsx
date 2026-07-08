@@ -72,7 +72,7 @@ export default function App() {
   const [editingObra, setEditingObra] = useState(null);
   const [viewCiclo, setViewCiclo] = useState(null);
   const [confirmCierre, setConfirmCierre] = useState(false);
-  const [cierreEmpresa, setCierreEmpresa] = useState('Todas'); // NUEVO ESTADO PARA EL CIERRE
+  const [cierreEmpresa, setCierreEmpresa] = useState('Todas');
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   // ESTADOS MÓDULO FACTURAS
@@ -133,7 +133,9 @@ export default function App() {
     numPedido: '',
     retencion: false,
     prontoPago: false,
-    formaPago: 'CONFIRMING A 120 DÍAS'
+    formaPago: 'CONFIRMING A 120 DÍAS',
+    usarImporteManual: false,
+    importeManual: ''
   });
 
   const [reportFilter, setReportFilter] = useState({ empresa: 'Todas', encargado: 'Todos' });
@@ -157,13 +159,11 @@ export default function App() {
       setCiclos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Cargar Facturas ordenadas por su numeración
     const qFacturas = query(collection(db, "facturas"));
     onSnapshot(qFacturas, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
       data.sort((a, b) => {
-        // Extraemos inteligentemente el primer número que exista en el N.º Factura
         const getNum = (str) => {
           const match = String(str || "").match(/\d+/);
           return match ? parseInt(match[0], 10) : 0;
@@ -172,7 +172,6 @@ export default function App() {
         const numA = getNum(a.numFactura);
         const numB = getNum(b.numFactura);
         
-        // Si el número inicial es el mismo, desempatamos por el año (la tercera parte de la cadena)
         if (numA === numB) {
           const yearA = parseInt(String(a.numFactura || "0").split('-')[2] || "0", 10);
           const yearB = parseInt(String(b.numFactura || "0").split('-')[2] || "0", 10);
@@ -244,7 +243,6 @@ export default function App() {
   const handleCerrarCiclo = async () => {
     if (!user) return;
     
-    // FILTRAMOS POR LA EMPRESA SELECCIONADA EN EL MODAL
     const obrasPendientes = obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa));
     
     if (obrasPendientes.length === 0) return showToast(`No hay obras pendientes ${cierreEmpresa !== 'Todas' ? `para ${cierreEmpresa}` : ''}.`, "warning");
@@ -261,7 +259,6 @@ export default function App() {
         return clean;
       });
 
-      // PERSONALIZAMOS EL NOMBRE DEL CICLO
       const prefix = cierreEmpresa === 'Todas' ? 'Cierre General' : `Cierre ${cierreEmpresa}`;
       const nombreCiclo = `${prefix} - ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'short', year: 'numeric'})}`;
       
@@ -271,7 +268,7 @@ export default function App() {
         obras: obrasSanitizadas, 
         totalObras: obrasSanitizadas.length, 
         creadoPor: user.uid,
-        empresaCierre: cierreEmpresa // Guardamos qué empresa se cerró
+        empresaCierre: cierreEmpresa 
       });
 
       let batch = writeBatch(db);
@@ -282,7 +279,7 @@ export default function App() {
       }
       if (count > 0) await batch.commit();
       
-      setCierreEmpresa('Todas'); // Reseteamos el selector
+      setCierreEmpresa('Todas'); 
       showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
       showToast("Error al procesar el cierre.", "error");
@@ -301,6 +298,9 @@ export default function App() {
     }, 0);
   }, [selectedForInvoice, viewCiclo]);
 
+  // Esta variable maneja si el usuario ha escrito un total manual o si usa la suma de las obras
+  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
+
   const handleCreateFactura = async (e) => {
     e.preventDefault();
     if (!invoiceForm.numFactura.trim()) return showToast("Falta número de factura", "warning");
@@ -308,13 +308,12 @@ export default function App() {
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
     
-    // MATEMÁTICA CORREGIDA PARA CREACIÓN DE FACTURA:
-    const prontoPagoAmount = invoiceForm.prontoPago ? subtotalFactura * 0.05 : 0;
-    const baseImponibleNeta = subtotalFactura - prontoPagoAmount; // El IVA se aplica DESPUÉS del pronto pago
+    // MATEMÁTICA CORREGIDA PARA CREACIÓN DE FACTURA USANDO EL SUBTOTAL EFECTIVO:
+    const prontoPagoAmount = invoiceForm.prontoPago ? effectiveSubtotalDisplay * 0.05 : 0;
+    const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount;
     const ivaAmount = baseImponibleNeta * 0.21;
     
-    // La retención es sobre el bruto inicial y se resta al final
-    const retencionAmount = invoiceForm.retencion ? subtotalFactura * 0.05 : 0; 
+    const retencionAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0; 
     
     const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
 
@@ -332,7 +331,7 @@ export default function App() {
       pedido: invoiceForm.numPedido,
       cliente: clienteData,
       obras: obrasDetalle,
-      subtotal: subtotalFactura, // Base bruta original
+      subtotal: effectiveSubtotalDisplay, // Guardamos el importe (manual o sumado)
       retencion: retencionAmount,
       retencionSolicitada: false,
       prontoPago: prontoPagoAmount,
@@ -362,7 +361,7 @@ export default function App() {
       setSelectedForInvoice([]);
       setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); 
       
-      setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPago: false });
+      setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPago: false, usarImporteManual: false, importeManual: '' });
       showToast("Factura generada y asignada con éxito", "success");
       setActiveTab('facturas'); 
       
@@ -435,7 +434,6 @@ export default function App() {
       let batch = writeBatch(db);
       let count = 0;
       for (const f of facturasToCreate) {
-        // Al sincronizar antiguas aplicamos las matemáticas corregidas (asumimos que si se crea es sin pronto pago pero con retencion)
         f.retencion = f.subtotal * 0.05; 
         f.prontoPago = 0;
         f.iva = f.subtotal * 0.21;
@@ -469,7 +467,6 @@ export default function App() {
         return { ...f, fechaElegibleStr, estadoRetencion };
       })
       .sort((a, b) => {
-        // Obligamos a que las retenciones también se ordenen por el N.º de Factura, no por fecha
         const getNum = (str) => {
           const match = String(str || "").match(/\d+/);
           return match ? parseInt(match[0], 10) : 0;
@@ -784,7 +781,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden hide-on-invoice-print">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
@@ -832,7 +828,6 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 print:p-0">
           
-          {}
           {activeTab === 'panel' && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end no-print">
@@ -906,7 +901,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'reportes' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center no-print">
@@ -973,7 +967,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'facturas' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="flex justify-between items-center no-print">
@@ -1010,7 +1003,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'retenciones' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="flex justify-between items-center no-print">
@@ -1091,7 +1083,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'cierres' && !viewCiclo && (
             <div className="space-y-6 animate-in fade-in">
               <div className="flex justify-between items-center no-print">
@@ -1189,7 +1180,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'ajustes' && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-10">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -1324,14 +1314,7 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
                    <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
-                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={invoiceForm.retencion} onChange={e => setInvoiceForm({...invoiceForm, retencion: e.target.checked})} />
-                     <div><span className="font-bold text-red-900 block">Aplicar 5% de Retención</span><span className="text-[10px] text-red-700 leading-none">Se descontará un 5% sobre el Total Bruto en el importe líquido.</span></div>
-                   </label>
-                   <label className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={invoiceForm.prontoPago} onChange={e => setInvoiceForm({...invoiceForm, prontoPago: e.target.checked})} />
-                     <div><span className="font-bold text-blue-900 block">Aplicar 5% de Pronto Pago</span><span className="text-[10px] text-blue-700 leading-none">Reduce la Base Imponible antes de calcular el IVA.</span></div>
-                   </label>
+                   
                    <InputGroup label="Forma de Pago Estipulada">
                       <select className="input-field bg-gray-100" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
                         <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
@@ -1340,6 +1323,35 @@ export default function App() {
                         <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
                       </select>
                    </InputGroup>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={invoiceForm.retencion} onChange={e => setInvoiceForm({...invoiceForm, retencion: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
+                   </label>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={invoiceForm.prontoPago} onChange={e => setInvoiceForm({...invoiceForm, prontoPago: e.target.checked})} />
+                     <div><span className="font-bold text-blue-900 block text-sm">Aplicar 5% de Pronto Pago</span></div>
+                   </label>
+
+                   <label className="flex items-center gap-3 p-3 mt-4 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-gray-600 rounded" checked={invoiceForm.usarImporteManual} onChange={e => {
+                        const isChecked = e.target.checked;
+                        setInvoiceForm({...invoiceForm, usarImporteManual: isChecked, importeManual: isChecked ? subtotalFactura : ''})
+                     }} />
+                     <div>
+                       <span className="font-bold text-gray-900 block text-sm">Modificar Importe Bruto Manualmente</span>
+                       <span className="text-[10px] text-gray-500 leading-none">Permite ajustar el importe base si sumas conceptos extra.</span>
+                     </div>
+                   </label>
+
+                   {invoiceForm.usarImporteManual && (
+                     <div className="pt-2 animate-in fade-in slide-in-from-top-2">
+                       <InputGroup label="Total Bruto Personalizado (€)">
+                         <input type="number" step="0.01" required={invoiceForm.usarImporteManual} className="input-field border-gray-300 font-bold text-lg text-gray-900" value={invoiceForm.importeManual} onChange={e => setInvoiceForm({...invoiceForm, importeManual: e.target.value})} />
+                       </InputGroup>
+                     </div>
+                   )}
                  </div>
 
                  <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
@@ -1347,19 +1359,18 @@ export default function App() {
                     <div className="space-y-3 font-mono text-sm">
                       <div className="flex justify-between items-center text-gray-300">
                         <span>TOTAL BRUTO:</span>
-                        <span className="font-bold text-white text-lg">{subtotalFactura.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        <span className="font-bold text-white text-lg">{effectiveSubtotalDisplay.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
-                      {/* LÓGICA DE VISUALIZACIÓN CORREGIDA */}
                       {invoiceForm.prontoPago && (
                         <>
                           <div className="flex justify-between items-center text-blue-400 border-b border-gray-700 pb-2">
                             <span>5% PRONTO PAGO:</span>
-                            <span>-{(subtotalFactura * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                            <span>-{(effectiveSubtotalDisplay * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                           </div>
                           <div className="flex justify-between items-center text-gray-200 font-bold">
                             <span>BASE IMPONIBLE NETA:</span>
-                            <span>{(subtotalFactura - (subtotalFactura * 0.05)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                            <span>{(effectiveSubtotalDisplay - (effectiveSubtotalDisplay * 0.05)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                           </div>
                         </>
                       )}
@@ -1367,19 +1378,19 @@ export default function App() {
                       {invoiceForm.retencion && (
                         <div className="flex justify-between items-center text-red-400">
                           <span>5% RETENCIÓN:</span>
-                          <span>-{(subtotalFactura * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                          <span>-{(effectiveSubtotalDisplay * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                         </div>
                       )}
                       
                       <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3">
                         <span>IVA 21%:</span>
-                        <span>{((subtotalFactura - (invoiceForm.prontoPago ? subtotalFactura * 0.05 : 0)) * 0.21).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        <span>{((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay * 0.05 : 0)) * 0.21).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
                       <div className="flex justify-between items-center pt-2 text-green-400">
                         <span className="font-black text-lg">A COBRAR:</span>
                         <span className="font-black text-2xl">
-                          {((subtotalFactura - (invoiceForm.prontoPago ? subtotalFactura*0.05 : 0)) + ((subtotalFactura - (invoiceForm.prontoPago ? subtotalFactura*0.05 : 0))*0.21) - (invoiceForm.retencion ? subtotalFactura*0.05 : 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                          {((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay*0.05 : 0)) + ((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay*0.05 : 0))*0.21) - (invoiceForm.retencion ? effectiveSubtotalDisplay*0.05 : 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                         </span>
                       </div>
                     </div>
@@ -1392,57 +1403,6 @@ export default function App() {
                   <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Emitir Factura Oficial</button>
                 </div>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL FORMULARIO OBRAS */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
-          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-              <h3 className="text-lg font-bold">{editingObra ? 'Editar Expediente' : 'Añadir Obra'}</h3>
-              <button onClick={() => setModalOpen(false)}><X className="text-gray-400 hover:text-white"/></button>
-            </div>
-            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
-                <InputGroup label="ID Carreras"><input required className="input-field" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. EXP-2024-001" /></InputGroup>
-                <InputGroup label="ID Obra (Cliente)"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OT-998877" /></InputGroup>
-                <InputGroup label="Nº Contrato"><select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}><option value="">Seleccionar...</option>{config.contratos?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                <InputGroup label="Nº Factura (Opcional)"><input className="input-field" value={formData.numFactura} onChange={e => setFormData({...formData, numFactura: e.target.value})} placeholder="Ej. F-2024-001" /></InputGroup>
-              </div>
-              <div className="space-y-4 md:col-span-1 border-r border-gray-100 pr-4">
-                <InputGroup label="Nombre Obra"><textarea required rows={2} className="input-field resize-none" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
-                <InputGroup label="Cliente"><select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}><option value="">Seleccionar...</option>{config.empresas?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                <InputGroup label="Zona / Central">
-                   <input list="centrales-datalist" required className="input-field bg-white" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})} placeholder="Escribe para buscar..." autoComplete="off" />
-                   <datalist id="centrales-datalist">{[...(config.centrales || [])].sort((a, b) => a.localeCompare(b, 'es')).map(op => <option key={op} value={op}></option>)}</datalist>
-                </InputGroup>
-              </div>
-              <div className="space-y-4 md:col-span-1">
-                <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
-                <InputGroup label="Base Imponible (€)"><input type="number" step="0.01" required className="input-field font-bold text-lg" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} /></InputGroup>
-                <div className="grid grid-cols-2 gap-2">
-                  <InputGroup label="Encargado"><select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}> <option value="">Seleccionar...</option>{config.encargados?.map(op => <option key={op} value={op}>{op}</option>)}</select></InputGroup>
-                  <InputGroup label="UUII (Viviendas)"><input type="number" className="input-field border-blue-200 bg-blue-50 text-blue-800 font-medium" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="Nº..." /></InputGroup>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2 shadow-inner">
-                   <label className="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} /><span className="text-sm font-bold text-gray-700">Aplicar Plus 5%</span></label>
-                   <div className="space-y-2 text-xs text-gray-600 border-t border-gray-200 pt-2">
-                      <div className="flex justify-between"><span>Base:</span><span className="font-medium">{parseFloat(formData.importe || 0).toFixed(2)} €</span></div>
-                      {formData.tieneRetencion && (<div className="flex justify-between text-blue-600"><span>+ Plus (5%):</span><span className="font-medium">+{(parseFloat(formData.importe || 0)*0.05).toFixed(2)} €</span></div>)}
-                      {parseFloat(formData.uuii) > 0 && (<div className="flex justify-between text-purple-600"><span>+ Viviendas ({formData.uuii}):</span><span className="font-medium">+{(parseFloat(formData.uuii)*1.5).toFixed(2)} €</span></div>)}
-                      <div className="flex justify-between font-black text-gray-900 text-lg pt-2 border-t border-gray-200 mt-2"><span>TOTAL ESTIMADO:</span><span>{(parseFloat(formData.importe || 0) + (formData.tieneRetencion ? parseFloat(formData.importe || 0)*0.05 : 0) + (parseFloat(formData.uuii || 0)*1.5)).toFixed(2)} €</span></div>
-                      <p className="text-[10px] text-gray-400 text-center mt-1">* IVA (21%) se calculará en el cierre.</p>
-                   </div>
-                </div>
-                <div className="flex bg-gray-100 rounded-lg p-1 mt-2">{['pendiente', 'facturado', 'cobrado'].map(st => (<button type="button" key={st} onClick={() => setFormData({...formData, estado: st})} className={`flex-1 py-1 text-xs font-bold rounded capitalize ${formData.estado === st ? 'bg-white text-red-600 shadow-sm' : 'text-gray-400'}`}>{st}</button>))}</div>
-              </div>
-              <div className="md:col-span-3">
-                <InputGroup label="Observaciones (Opcional)"><textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} placeholder="Notas adicionales..." /></InputGroup>
-              </div>
-              <div className="md:col-span-3 pt-4 border-t border-gray-100 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button><button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-red-200 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all">Guardar Obra</button></div>
             </form>
           </div>
         </div>
@@ -1495,7 +1455,7 @@ export default function App() {
               e.preventDefault();
               try {
                 // MATEMÁTICA CORREGIDA PARA EDICIÓN DE FACTURA:
-                const subtotal = editingFactura.subtotal || 0;
+                const subtotal = parseFloat(editingFactura.subtotal) || 0;
                 
                 const prontoPagoAmount = editingFactura.prontoPagoEnabled ? subtotal * 0.05 : 0;
                 const baseImponibleNeta = subtotal - prontoPagoAmount;
@@ -1510,6 +1470,7 @@ export default function App() {
                   contrato: editingFactura.contrato || '',
                   pedido: editingFactura.pedido || '',
                   cliente: editingFactura.cliente,
+                  subtotal: subtotal, // Guardamos el nuevo subtotal si lo modificaron
                   retencion: retencionAmount,
                   prontoPago: prontoPagoAmount,
                   iva: ivaAmount,
@@ -1554,6 +1515,14 @@ export default function App() {
                 <InputGroup label="Nº Pedido">
                   <input className="input-field" value={editingFactura.pedido || ''} onChange={e => setEditingFactura({...editingFactura, pedido: e.target.value})} placeholder="Opcional..." />
                 </InputGroup>
+                
+                {/* AÑADIDO: Campo para editar el importe (Base Imponible) en facturas existentes */}
+                <div className="col-span-2">
+                  <InputGroup label="Base Imponible (Total Bruto €)">
+                    <input type="number" step="0.01" required className="input-field font-black text-gray-900 bg-white border-2 border-gray-300" value={editingFactura.subtotal || 0} onChange={e => setEditingFactura({...editingFactura, subtotal: e.target.value})} />
+                  </InputGroup>
+                  <p className="text-[10px] text-gray-500 mt-1 italic">Edita este importe si necesitas cuadrar la factura por conceptos extra.</p>
+                </div>
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3 mt-2">
