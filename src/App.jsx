@@ -81,8 +81,9 @@ export default function App() {
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
   const [editingFactura, setEditingFactura] = useState(null);
 
-  // ESTADO NUEVO: MÓDULO RETENCIONES
+  // ESTADO MÓDULO RETENCIONES
   const [retencionesFilter, setRetencionesFilter] = useState('Todas');
+  const [editingRetencion, setEditingRetencion] = useState(null); // NUEVO ESTADO PARA EDITAR RETENCIONES
 
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientData, setNewClientData] = useState({ nombre: '', cif: '', direccion: '' });
@@ -298,7 +299,6 @@ export default function App() {
     }, 0);
   }, [selectedForInvoice, viewCiclo]);
 
-  // Esta variable maneja si el usuario ha escrito un total manual o si usa la suma de las obras
   const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
 
   const handleCreateFactura = async (e) => {
@@ -308,7 +308,6 @@ export default function App() {
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
     
-    // MATEMÁTICA CORREGIDA PARA CREACIÓN DE FACTURA USANDO EL SUBTOTAL EFECTIVO:
     const prontoPagoAmount = invoiceForm.prontoPago ? effectiveSubtotalDisplay * 0.05 : 0;
     const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount;
     const ivaAmount = baseImponibleNeta * 0.21;
@@ -331,7 +330,7 @@ export default function App() {
       pedido: invoiceForm.numPedido,
       cliente: clienteData,
       obras: obrasDetalle,
-      subtotal: effectiveSubtotalDisplay, // Guardamos el importe (manual o sumado)
+      subtotal: effectiveSubtotalDisplay,
       retencion: retencionAmount,
       retencionSolicitada: false,
       prontoPago: prontoPagoAmount,
@@ -749,7 +748,6 @@ export default function App() {
                   <span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
-              {/* Mostramos la Base Imponible Real (Bruto - Pronto Pago) si hubo descuento */}
               {invoiceToPrint.prontoPago > 0 && (
                 <div className="flex justify-between font-bold mb-3 text-gray-700">
                   <span>BASE IMPONIBLE NETA:</span>
@@ -1042,38 +1040,49 @@ export default function App() {
                       <th className="px-6 py-4">Nº Factura</th>
                       <th className="px-6 py-4">Fecha Factura</th>
                       <th className="px-6 py-4">Cliente</th>
-                      <th className="px-6 py-4 bg-gray-100">Reclamable Desde</th>
+                      <th className="px-6 py-4 bg-gray-100">Fecha Reclamación / Cobro</th>
                       <th className="px-6 py-4 text-right">Retención (5%)</th>
-                      <th className="px-6 py-4 text-center">Estado</th>
-                      <th className="px-6 py-4 text-center no-print">Acción</th>
+                      <th className="px-6 py-4 text-center">Acción y Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {retencionesFiltradas.length === 0 && (
-                      <tr><td colSpan="7" className="text-center py-8 text-gray-400">No hay retenciones en esta categoría.</td></tr>
+                      <tr><td colSpan="6" className="text-center py-8 text-gray-400">No hay retenciones en esta categoría.</td></tr>
                     )}
                     {retencionesFiltradas.map(r => (
                       <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4 font-bold text-gray-900">{r.numFactura}</td>
                         <td className="px-6 py-4 text-gray-500">{new Date(r.fecha).toLocaleDateString()}</td>
                         <td className="px-6 py-4 font-medium text-gray-700">{r.cliente.nombre}</td>
-                        <td className="px-6 py-4 font-mono font-bold text-gray-800 bg-gray-50/50">{new Date(r.fechaElegibleStr).toLocaleDateString()}</td>
-                        <td className="px-6 py-4 text-right font-bold text-red-600">{r.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                        <td className="px-6 py-4 text-center">
-                          {r.estadoRetencion === 'solicitada' && <span className="bg-green-100 text-green-700 border border-green-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider">Solicitada</span>}
-                          {r.estadoRetencion === 'pendiente_solicitar' && <span className="bg-red-100 text-red-700 border border-red-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider shadow-sm animate-pulse">Pendiente</span>}
-                          {r.estadoRetencion === 'en_espera' && <span className="bg-yellow-100 text-yellow-700 border border-yellow-200 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider">En Espera</span>}
-                        </td>
-                        <td className="px-6 py-4 text-center no-print">
-                          {r.estadoRetencion === 'pendiente_solicitar' ? (
-                            <button onClick={() => handleMarcarRetencion(r.id)} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95 whitespace-nowrap">
-                              ¡Reclamar Ya!
-                            </button>
-                          ) : r.estadoRetencion === 'solicitada' ? (
-                            <CheckCircle size={24} className="mx-auto text-green-500"/>
+                        <td className="px-6 py-4 font-mono font-bold text-gray-800 bg-gray-50/50 text-xs">
+                          {r.estadoRetencion === 'solicitada' && r.fechaSolicitudRetencion ? (
+                            <span className="text-green-700 block">Cobrada el:<br/>{new Date(r.fechaSolicitudRetencion).toLocaleDateString()}</span>
                           ) : (
-                            <Lock size={20} className="mx-auto text-gray-300" />
+                            <span className="block text-gray-600">Reclamable desde:<br/>{new Date(r.fechaElegibleStr).toLocaleDateString()}</span>
                           )}
+                        </td>
+                        <td className="px-6 py-4 text-right font-bold text-red-600">{r.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                        <td className="px-6 py-4 text-center no-print">
+                          <div className="flex items-center justify-center gap-2">
+                            {r.estadoRetencion === 'pendiente_solicitar' ? (
+                              <button onClick={() => handleMarcarRetencion(r.id)} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95 whitespace-nowrap">
+                                ¡Reclamar Ya!
+                              </button>
+                            ) : r.estadoRetencion === 'solicitada' ? (
+                              <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded-full text-[10px] uppercase font-black tracking-wider flex items-center gap-1"><CheckCircle size={12}/> Cobrada</span>
+                            ) : (
+                              <span className="bg-yellow-100 text-yellow-700 border border-yellow-200 px-2 py-1 rounded-full text-[10px] uppercase font-black tracking-wider flex items-center gap-1"><Lock size={12}/> En Espera</span>
+                            )}
+                            
+                            <button onClick={() => setEditingRetencion({
+                              id: r.id, 
+                              numFactura: r.numFactura, 
+                              retencionSolicitada: r.retencionSolicitada || false,
+                              fechaSolicitudRetencion: r.fechaSolicitudRetencion ? r.fechaSolicitudRetencion.split('T')[0] : new Date().toISOString().split('T')[0]
+                            })} className="bg-gray-100 text-blue-600 hover:bg-blue-100 p-1.5 rounded-lg transition-colors border border-gray-200" title="Editar Estado Manualmente">
+                              <Edit size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1267,6 +1276,73 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* MODAL OBRA (EL QUE FALTABA) */}
+      {modalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg">{editingObra ? 'Editar Expediente' : 'Nuevo Expediente'}</h3>
+              <button onClick={() => setModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+            </div>
+            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="ID Carreras"><input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} /></InputGroup>
+                <InputGroup label="ID Obra"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} /></InputGroup>
+              </div>
+              <InputGroup label="Nombre / Descripción"><input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Empresa (Cliente)">
+                  <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.empresas?.map(emp => <option key={emp} value={emp}>{emp}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Central / Zona">
+                  <select className="input-field" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.centrales?.map(cen => <option key={cen} value={cen}>{cen}</option>)}
+                  </select>
+                </InputGroup>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Encargado">
+                  <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.encargados?.map(enc => <option key={enc} value={enc}>{enc}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Contrato">
+                  <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.contratos?.map(con => <option key={con} value={con}>{con}</option>)}
+                  </select>
+                </InputGroup>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <InputGroup label="Importe Base (€)"><input type="number" step="0.01" required className="input-field font-black text-gray-900 border-2 border-gray-300" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} /></InputGroup>
+                <InputGroup label="UUII Extras"><input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} /></InputGroup>
+                <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
+              </div>
+
+              <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
+                <span className="font-bold text-red-900 text-sm">Aplicar 5% de Plus Retención al Expediente</span>
+              </label>
+
+              <InputGroup label="Observaciones"><textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} /></InputGroup>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2"><Save size={18}/> Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL CREACIÓN FACTURA OFICIAL */}
       {invoiceModalOpen && (
@@ -1516,7 +1592,6 @@ export default function App() {
                   <input className="input-field" value={editingFactura.pedido || ''} onChange={e => setEditingFactura({...editingFactura, pedido: e.target.value})} placeholder="Opcional..." />
                 </InputGroup>
                 
-                {/* AÑADIDO: Campo para editar el importe (Base Imponible) en facturas existentes */}
                 <div className="col-span-2">
                   <InputGroup label="Base Imponible (Total Bruto €)">
                     <input type="number" step="0.01" required className="input-field font-black text-gray-900 bg-white border-2 border-gray-300" value={editingFactura.subtotal || 0} onChange={e => setEditingFactura({...editingFactura, subtotal: e.target.value})} />
@@ -1542,6 +1617,59 @@ export default function App() {
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-2">
                 <button type="button" onClick={() => setEditingFactura(null)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
                 <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-blue-200 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all"><Save size={18}/> Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDICIÓN RETENCIÓN MANUAL (NUEVO) */}
+      {editingRetencion && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-bold flex items-center gap-2"><PiggyBank size={20}/> Retención: {editingRetencion.numFactura}</h3>
+              <button onClick={() => setEditingRetencion(null)}><X className="text-gray-400 hover:text-white"/></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await updateDoc(doc(db, "facturas", editingRetencion.id), { 
+                  retencionSolicitada: editingRetencion.retencionSolicitada,
+                  fechaSolicitudRetencion: editingRetencion.retencionSolicitada ? new Date(editingRetencion.fechaSolicitudRetencion).toISOString() : null
+                });
+                showToast("Estado de retención actualizado", "success");
+                setEditingRetencion(null);
+              } catch(err) {
+                showToast("Error al guardar", "error");
+              }
+            }} className="p-6 flex flex-col gap-5">
+              
+              <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" 
+                    checked={editingRetencion.retencionSolicitada} 
+                    onChange={e => setEditingRetencion({...editingRetencion, retencionSolicitada: e.target.checked})} 
+                  />
+                  <span className="font-bold text-blue-900">Marcar como Cobrada / Reclamada</span>
+                </label>
+                <p className="text-xs text-blue-700 mt-1 ml-8">Permite adelantar el cobro manualmente y sacarla de "Pendientes".</p>
+              </div>
+
+              {editingRetencion.retencionSolicitada && (
+                <div className="animate-in fade-in slide-in-from-top-2">
+                  <InputGroup label="Fecha exacta de Cobro / Reclamación">
+                    <input type="date" required className="input-field border-2 border-blue-200" 
+                      value={editingRetencion.fechaSolicitudRetencion} 
+                      onChange={e => setEditingRetencion({...editingRetencion, fechaSolicitudRetencion: e.target.value})} 
+                    />
+                  </InputGroup>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => setEditingRetencion(null)} className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-6 py-2 rounded-lg text-white font-bold bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2"><Save size={16}/> Guardar</button>
               </div>
             </form>
           </div>
