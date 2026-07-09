@@ -1285,18 +1285,31 @@ export default function App() {
               <h3 className="font-bold text-lg">{editingObra ? 'Editar Expediente' : 'Nuevo Expediente'}</h3>
               <button onClick={() => setModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
             </div>
-            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
-                <InputGroup label="ID Carreras"><input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} /></InputGroup>
-                <InputGroup label="ID Obra"><input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} /></InputGroup>
+            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <InputGroup label="ID Carreras *">
+                  <input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. 12345" />
+                </InputGroup>
+                <InputGroup label="ID Obra (Opcional)">
+                  <input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OB-001" />
+                </InputGroup>
               </div>
-              <InputGroup label="Nombre / Descripción"><input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} /></InputGroup>
+
+              <InputGroup label="Nombre / Descripción de los trabajos *">
+                <input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} placeholder="Descripción del trabajo..." />
+              </InputGroup>
               
-              <div className="grid grid-cols-2 gap-4">
-                <InputGroup label="Empresa (Cliente)">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <InputGroup label="Empresa (Cliente) *">
                   <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
                     <option value="">Seleccionar...</option>
                     {config.empresas?.map(emp => <option key={emp} value={emp}>{emp}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Encargado *">
+                  <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.encargados?.map(enc => <option key={enc} value={enc}>{enc}</option>)}
                   </select>
                 </InputGroup>
                 <InputGroup label="Central / Zona">
@@ -1307,37 +1320,48 @@ export default function App() {
                 </InputGroup>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <InputGroup label="Encargado">
-                  <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
-                    <option value="">Seleccionar...</option>
-                    {config.encargados?.map(enc => <option key={enc} value={enc}>{enc}</option>)}
-                  </select>
-                </InputGroup>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <InputGroup label="Contrato">
                   <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
                     <option value="">Seleccionar...</option>
                     {config.contratos?.map(con => <option key={con} value={con}>{con}</option>)}
                   </select>
                 </InputGroup>
+                <InputGroup label="Fecha *">
+                  <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
+                </InputGroup>
+                <InputGroup label="Importe Base (€) *">
+                  <input type="number" step="0.01" required className="input-field font-black text-gray-900 border-2 border-gray-300" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} />
+                </InputGroup>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <InputGroup label="Importe Base (€)"><input type="number" step="0.01" required className="input-field font-black text-gray-900 border-2 border-gray-300" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} /></InputGroup>
-                <InputGroup label="UUII Extras"><input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} /></InputGroup>
-                <InputGroup label="Fecha"><input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} /></InputGroup>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <InputGroup label="UUII Extras (€)">
+                  <input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="0.00" />
+                </InputGroup>
+                <label className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors h-[42px]">
+                  <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
+                  <span className="font-bold text-gray-700 text-sm">Aplicar 5% Retención (Plus)</span>
+                </label>
               </div>
 
-              <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
-                <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
-                <span className="font-bold text-red-900 text-sm">Aplicar 5% de Plus Retención al Expediente</span>
-              </label>
+              <InputGroup label="Observaciones">
+                <textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} placeholder="Notas adicionales..." />
+              </InputGroup>
 
-              <InputGroup label="Observaciones"><textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} /></InputGroup>
+              {/* RECUADRO DE CÁLCULO EN TIEMPO REAL: BASE + 5% + UUII */}
+              <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex justify-between items-center mt-2">
+                <span className="text-sm font-bold text-blue-800">Total Expediente (Base + 5% + UUII):</span>
+                <span className="text-lg font-black text-blue-900">
+                  {((parseFloat(formData.importe) || 0) + 
+                    (formData.tieneRetencion ? (parseFloat(formData.importe) || 0) * 0.05 : 0) + 
+                    ((parseFloat(formData.uuii) || 0) * 1.5)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                </span>
+              </div>
 
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
-                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2"><Save size={18}/> Guardar</button>
+                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-2"><Save size={18}/> {editingObra ? 'Actualizar Obra' : 'Guardar Obra'}</button>
               </div>
             </form>
           </div>
