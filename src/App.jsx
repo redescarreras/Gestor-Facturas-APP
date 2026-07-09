@@ -83,7 +83,7 @@ export default function App() {
 
   // ESTADO MÓDULO RETENCIONES
   const [retencionesFilter, setRetencionesFilter] = useState('Todas');
-  const [editingRetencion, setEditingRetencion] = useState(null); // NUEVO ESTADO PARA EDITAR RETENCIONES
+  const [editingRetencion, setEditingRetencion] = useState(null); 
 
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientData, setNewClientData] = useState({ nombre: '', cif: '', direccion: '' });
@@ -164,6 +164,7 @@ export default function App() {
     onSnapshot(qFacturas, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
+      // Orden numérico de facturas basado en el primer número encontrado
       data.sort((a, b) => {
         const getNum = (str) => {
           const match = String(str || "").match(/\d+/);
@@ -794,6 +795,7 @@ export default function App() {
         </nav>
       </aside>
 
+      {}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative bg-gray-50/50 print:h-auto print:overflow-visible hide-on-invoice-print">
         <div className="print-header w-full">
           <div className="flex items-center gap-6">
@@ -1277,7 +1279,8 @@ export default function App() {
         </div>
       </main>
 
-      {/* MODAL OBRA (EL QUE FALTABA) */}
+      {}
+      {/* MODAL OBRA */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
@@ -1286,6 +1289,7 @@ export default function App() {
               <button onClick={() => setModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
             </div>
             <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-5">
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputGroup label="ID Carreras *">
                   <input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. 12345" />
@@ -1299,6 +1303,7 @@ export default function App() {
                 <input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} placeholder="Descripción del trabajo..." />
               </InputGroup>
               
+              {/* FILA DE 3 COLUMNAS ORIGINAL */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <InputGroup label="Empresa (Cliente) *">
                   <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
@@ -1320,6 +1325,7 @@ export default function App() {
                 </InputGroup>
               </div>
 
+              {/* OTRA FILA DE 3 COLUMNAS ORIGINAL */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <InputGroup label="Contrato">
                   <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
@@ -1335,6 +1341,7 @@ export default function App() {
                 </InputGroup>
               </div>
 
+              {/* FILA UUII Y CHECKBOX */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <InputGroup label="UUII Extras (€)">
                   <input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="0.00" />
@@ -1368,6 +1375,7 @@ export default function App() {
         </div>
       )}
 
+      {}
       {/* MODAL CREACIÓN FACTURA OFICIAL */}
       {invoiceModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
@@ -1616,6 +1624,7 @@ export default function App() {
                   <input className="input-field" value={editingFactura.pedido || ''} onChange={e => setEditingFactura({...editingFactura, pedido: e.target.value})} placeholder="Opcional..." />
                 </InputGroup>
                 
+                {/* AÑADIDO: Campo para editar el importe (Base Imponible) en facturas existentes */}
                 <div className="col-span-2">
                   <InputGroup label="Base Imponible (Total Bruto €)">
                     <input type="number" step="0.01" required className="input-field font-black text-gray-900 bg-white border-2 border-gray-300" value={editingFactura.subtotal || 0} onChange={e => setEditingFactura({...editingFactura, subtotal: e.target.value})} />
@@ -1647,7 +1656,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL EDICIÓN RETENCIÓN MANUAL (NUEVO) */}
+      {/* MODAL EDICIÓN RETENCIÓN MANUAL */}
       {editingRetencion && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
