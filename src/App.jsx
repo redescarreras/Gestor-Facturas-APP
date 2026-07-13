@@ -11,7 +11,7 @@ import {
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
-  doc, deleteDoc, query, orderBy, setDoc, getDoc, writeBatch 
+  doc, deleteDoc, query, orderBy, setDoc, writeBatch 
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
@@ -81,7 +81,7 @@ export default function App() {
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
   const [editingFactura, setEditingFactura] = useState(null);
 
-  // NUEVOS ESTADOS FACTURA MANUAL
+  // ESTADOS FACTURA MANUAL
   const [manualInvoiceModalOpen, setManualInvoiceModalOpen] = useState(false);
   const [manualInvoiceForm, setManualInvoiceForm] = useState({
     clienteIdx: 0,
@@ -90,8 +90,9 @@ export default function App() {
     numContrato: '',
     numPedido: '',
     subtotal: '',
-    retencion: true, // Por defecto aplicada
-    prontoPago: false,
+    retencion: true,
+    prontoPagoTipo: '0', // 0, 2.5, 5
+    descuentoManual: '',
     formaPago: 'CONFIRMING A 120 DÍAS'
   });
 
@@ -147,7 +148,8 @@ export default function App() {
     numContrato: '',
     numPedido: '',
     retencion: false,
-    prontoPago: false,
+    prontoPagoTipo: '0', // 0, 2.5, 5
+    descuentoManual: '',
     formaPago: 'CONFIRMING A 120 DÍAS',
     usarImporteManual: false,
     importeManual: ''
@@ -183,16 +185,13 @@ export default function App() {
           const match = String(str || "").match(/\d+/);
           return match ? parseInt(match[0], 10) : 0;
         };
-        
         const numA = getNum(a.numFactura);
         const numB = getNum(b.numFactura);
-        
         if (numA === numB) {
           const yearA = parseInt(String(a.numFactura || "0").split('-')[2] || "0", 10);
           const yearB = parseInt(String(b.numFactura || "0").split('-')[2] || "0", 10);
           return yearA - yearB;
         }
-        
         return numA - numB;
       });
       
@@ -322,8 +321,11 @@ export default function App() {
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
     
-    const prontoPagoAmount = invoiceForm.prontoPago ? effectiveSubtotalDisplay * 0.05 : 0;
-    const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount;
+    const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
+    const prontoPagoAmount = effectiveSubtotalDisplay * (ppRate / 100);
+    const descManualAmount = parseFloat(invoiceForm.descuentoManual) || 0;
+    
+    const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount - descManualAmount;
     const ivaAmount = baseImponibleNeta * 0.21;
     
     const retencionAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0; 
@@ -348,6 +350,8 @@ export default function App() {
       retencion: retencionAmount,
       retencionSolicitada: false,
       prontoPago: prontoPagoAmount,
+      prontoPagoTipo: ppRate,
+      descuentoManual: descManualAmount,
       iva: ivaAmount,
       total: totalAmount,
       formaPago: invoiceForm.formaPago,
@@ -374,7 +378,7 @@ export default function App() {
       setSelectedForInvoice([]);
       setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); 
       
-      setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPago: false, usarImporteManual: false, importeManual: '' });
+      setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPagoTipo: '0', descuentoManual: '', usarImporteManual: false, importeManual: '' });
       showToast("Factura generada y asignada con éxito", "success");
       setActiveTab('facturas'); 
       
@@ -384,7 +388,6 @@ export default function App() {
     }
   };
 
-  // NUEVA FUNCIÓN PARA FACTURAS MANUALES SUELTAS
   const handleCreateManualInvoice = async (e) => {
     e.preventDefault();
     if (!manualInvoiceForm.numFactura.trim()) return showToast("Falta número de factura", "warning");
@@ -395,8 +398,11 @@ export default function App() {
     const clienteData = config.empresasFacturacion[manualInvoiceForm.clienteIdx] || { nombre: 'Cliente Genérico', cif: 'Desconocido', direccion: '' };
     
     const subtotal = parseFloat(manualInvoiceForm.subtotal);
-    const prontoPagoAmount = manualInvoiceForm.prontoPago ? subtotal * 0.05 : 0;
-    const baseImponibleNeta = subtotal - prontoPagoAmount;
+    const ppRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
+    const prontoPagoAmount = subtotal * (ppRate / 100);
+    const descManualAmount = parseFloat(manualInvoiceForm.descuentoManual) || 0;
+
+    const baseImponibleNeta = subtotal - prontoPagoAmount - descManualAmount;
     const ivaAmount = baseImponibleNeta * 0.21;
     const retencionAmount = manualInvoiceForm.retencion ? subtotal * 0.05 : 0; 
     
@@ -408,15 +414,17 @@ export default function App() {
       contrato: manualInvoiceForm.numContrato,
       pedido: manualInvoiceForm.numPedido,
       cliente: clienteData,
-      obras: [], // Vacío porque es manual, no proviene de un ciclo de la app
+      obras: [], 
       subtotal: subtotal,
       retencion: retencionAmount,
       retencionSolicitada: false,
       prontoPago: prontoPagoAmount,
+      prontoPagoTipo: ppRate,
+      descuentoManual: descManualAmount,
       iva: ivaAmount,
       total: totalAmount,
       formaPago: manualInvoiceForm.formaPago,
-      cicloId: 'manual', // Marca para identificarla
+      cicloId: 'manual', 
       createdAt: new Date().toISOString()
     };
 
@@ -431,7 +439,8 @@ export default function App() {
         numPedido: '', 
         subtotal: '',
         retencion: true,
-        prontoPago: false
+        prontoPagoTipo: '0',
+        descuentoManual: ''
       });
       showToast("Factura manual generada con éxito", "success");
     } catch (error) {
@@ -476,6 +485,8 @@ export default function App() {
                 retencion: 0,
                 retencionSolicitada: false,
                 prontoPago: 0,
+                prontoPagoTipo: 0,
+                descuentoManual: 0,
                 iva: 0,
                 total: 0,
                 formaPago: 'CONFIRMING A 120 DÍAS',
@@ -815,25 +826,34 @@ export default function App() {
                 <span className="text-gray-600">TOTAL BRUTO:</span>
                 <span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
+              
               {invoiceToPrint.prontoPago > 0 && (
                 <div className="flex justify-between mb-2 text-blue-600 font-medium border-b border-gray-100 pb-2">
-                  <span>5% PRONTO PAGO:</span>
+                  <span>{invoiceToPrint.prontoPagoTipo || 5}% PRONTO PAGO:</span>
                   <span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
-              {invoiceToPrint.prontoPago > 0 && (
-                <div className="flex justify-between font-bold mb-3 text-gray-700">
-                  <span>BASE IMPONIBLE NETA:</span>
-                  <span>{(invoiceToPrint.subtotal - invoiceToPrint.prontoPago).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+              {invoiceToPrint.descuentoManual > 0 && (
+                <div className="flex justify-between mb-2 text-purple-600 font-medium border-b border-gray-100 pb-2">
+                  <span>DESCUENTO MANUAL:</span>
+                  <span>-{invoiceToPrint.descuentoManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
+              {(invoiceToPrint.prontoPago > 0 || invoiceToPrint.descuentoManual > 0) && (
+                <div className="flex justify-between font-bold mb-3 text-gray-700">
+                  <span>BASE IMPONIBLE NETA:</span>
+                  <span>{(invoiceToPrint.subtotal - (invoiceToPrint.prontoPago || 0) - (invoiceToPrint.descuentoManual || 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                </div>
+              )}
+              
               {invoiceToPrint.retencion > 0 && (
-                <div className="flex justify-between mb-2 text-red-600 font-medium">
+                <div className="flex justify-between mb-2 text-red-600 font-medium mt-2">
                   <span>5% RETENCIÓN:</span>
                   <span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                 </div>
               )}
-              <div className="flex justify-between mb-3 text-gray-700 font-medium">
+              
+              <div className="flex justify-between mb-3 text-gray-700 font-medium mt-2">
                 <span>IVA 21%:</span>
                 <span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
@@ -1065,7 +1085,12 @@ export default function App() {
                          <td className="px-6 py-4 text-right font-black text-gray-900">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                          <td className="px-6 py-4 text-center">
                            <div className="flex justify-center gap-2">
-                             <button onClick={() => setEditingFactura({...f, retencionEnabled: f.retencion > 0, prontoPagoEnabled: f.prontoPago > 0})} className="inline-flex items-center justify-center bg-blue-100 text-blue-700 p-2 rounded hover:bg-blue-200 transition-colors" title="Editar Factura"><Edit size={16} /></button>
+                             <button onClick={() => setEditingFactura({
+                               ...f, 
+                               retencionEnabled: f.retencion > 0, 
+                               prontoPagoTipo: f.prontoPagoTipo !== undefined ? String(f.prontoPagoTipo) : (f.prontoPago > 0 ? '5' : '0'),
+                               descuentoManual: f.descuentoManual || ''
+                              })} className="inline-flex items-center justify-center bg-blue-100 text-blue-700 p-2 rounded hover:bg-blue-200 transition-colors" title="Editar Factura"><Edit size={16} /></button>
                              <button onClick={() => printSpecificInvoice(f)} className="inline-flex items-center justify-center bg-gray-900 text-white p-2 rounded hover:bg-red-600 transition-colors" title="Imprimir"><Printer size={16} /></button>
                            </div>
                          </td>
@@ -1453,7 +1478,16 @@ export default function App() {
       )}
 
       {/* MODAL CREACIÓN FACTURA OFICIAL DESDE CICLO */}
-      {invoiceModalOpen && (
+      {invoiceModalOpen && (() => {
+        const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
+        const ppAmount = effectiveSubtotalDisplay * (ppRate / 100);
+        const descManual = parseFloat(invoiceForm.descuentoManual) || 0;
+        const baseNet = effectiveSubtotalDisplay - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
           <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
             <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1500,7 +1534,7 @@ export default function App() {
                    <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
                    
                    <InputGroup label="Forma de Pago Estipulada">
-                      <select className="input-field bg-gray-100" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
+                      <select className="input-field bg-gray-100 font-medium" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
                         <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
                         <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
                         <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
@@ -1513,10 +1547,19 @@ export default function App() {
                      <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
                    </label>
                    
-                   <label className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={invoiceForm.prontoPago} onChange={e => setInvoiceForm({...invoiceForm, prontoPago: e.target.checked})} />
-                     <div><span className="font-bold text-blue-900 block text-sm">Aplicar 5% de Pronto Pago</span></div>
-                   </label>
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={invoiceForm.prontoPagoTipo} onChange={e => setInvoiceForm({...invoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option>
+                         <option value="2.5">Aplicar 2,5%</option>
+                         <option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={invoiceForm.descuentoManual} onChange={e => setInvoiceForm({...invoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
 
                    <label className="flex items-center gap-3 p-3 mt-4 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
                      <input type="checkbox" className="w-5 h-5 text-gray-600 rounded" checked={invoiceForm.usarImporteManual} onChange={e => {
@@ -1546,35 +1589,43 @@ export default function App() {
                         <span className="font-bold text-white text-lg">{effectiveSubtotalDisplay.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
-                      {invoiceForm.prontoPago && (
-                        <>
-                          <div className="flex justify-between items-center text-blue-400 border-b border-gray-700 pb-2">
-                            <span>5% PRONTO PAGO:</span>
-                            <span>-{(effectiveSubtotalDisplay * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                          </div>
-                          <div className="flex justify-between items-center text-gray-200 font-bold">
-                            <span>BASE IMPONIBLE NETA:</span>
-                            <span>{(effectiveSubtotalDisplay - (effectiveSubtotalDisplay * 0.05)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                          </div>
-                        </>
-                      )}
-
-                      {invoiceForm.retencion && (
-                        <div className="flex justify-between items-center text-red-400">
-                          <span>5% RETENCIÓN:</span>
-                          <span>-{(effectiveSubtotalDisplay * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      {ppAmount > 0 && (
+                        <div className="flex justify-between items-center text-blue-400">
+                          <span>{ppRate}% PRONTO PAGO:</span>
+                          <span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                         </div>
                       )}
                       
-                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3">
+                      {descManual > 0 && (
+                        <div className="flex justify-between items-center text-purple-400">
+                          <span>DESCUENTO EXTRA:</span>
+                          <span>-{descManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {(ppAmount > 0 || descManual > 0) && (
+                        <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2">
+                          <span>BASE IMPONIBLE NETA:</span>
+                          <span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {invoiceForm.retencion && (
+                        <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2">
+                          <span>5% RETENCIÓN:</span>
+                          <span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2">
                         <span>IVA 21%:</span>
-                        <span>{((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay * 0.05 : 0)) * 0.21).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        <span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
                       <div className="flex justify-between items-center pt-2 text-green-400">
                         <span className="font-black text-lg">A COBRAR:</span>
                         <span className="font-black text-2xl">
-                          {((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay*0.05 : 0)) + ((effectiveSubtotalDisplay - (invoiceForm.prontoPago ? effectiveSubtotalDisplay*0.05 : 0))*0.21) - (invoiceForm.retencion ? effectiveSubtotalDisplay*0.05 : 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                          {totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                         </span>
                       </div>
                     </div>
@@ -1590,10 +1641,21 @@ export default function App() {
             </form>
           </div>
         </div>
-      )}
+      );
+      })()}
 
       {/* MODAL AÑADIR FACTURA MANUAL */}
-      {manualInvoiceModalOpen && (
+      {manualInvoiceModalOpen && (() => {
+        const subtotal = parseFloat(manualInvoiceForm.subtotal) || 0;
+        const ppRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
+        const ppAmount = subtotal * (ppRate / 100);
+        const descManual = parseFloat(manualInvoiceForm.descuentoManual) || 0;
+        const baseNet = subtotal - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = manualInvoiceForm.retencion ? subtotal * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
           <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
             <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1644,7 +1706,7 @@ export default function App() {
                    </InputGroup>
 
                    <InputGroup label="Forma de Pago Estipulada">
-                      <select className="input-field bg-gray-100" value={manualInvoiceForm.formaPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, formaPago: e.target.value})}>
+                      <select className="input-field bg-gray-100 font-medium" value={manualInvoiceForm.formaPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, formaPago: e.target.value})}>
                         <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
                         <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
                         <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
@@ -1657,10 +1719,19 @@ export default function App() {
                      <div><span className="font-bold text-red-900 block text-sm">Generar 5% de Retención (Aparecerá en el Control)</span></div>
                    </label>
                    
-                   <label className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={manualInvoiceForm.prontoPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, prontoPago: e.target.checked})} />
-                     <div><span className="font-bold text-blue-900 block text-sm">Aplicar 5% de Pronto Pago al Total Bruto</span></div>
-                   </label>
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={manualInvoiceForm.prontoPagoTipo} onChange={e => setManualInvoiceForm({...manualInvoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option>
+                         <option value="2.5">Aplicar 2,5%</option>
+                         <option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={manualInvoiceForm.descuentoManual} onChange={e => setManualInvoiceForm({...manualInvoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
                  </div>
 
                  <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
@@ -1668,38 +1739,46 @@ export default function App() {
                     <div className="space-y-3 font-mono text-sm">
                       <div className="flex justify-between items-center text-gray-300">
                         <span>TOTAL BRUTO:</span>
-                        <span className="font-bold text-white text-lg">{(parseFloat(manualInvoiceForm.subtotal) || 0).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        <span className="font-bold text-white text-lg">{subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
-                      {manualInvoiceForm.prontoPago && (
-                        <>
-                          <div className="flex justify-between items-center text-blue-400 border-b border-gray-700 pb-2">
-                            <span>5% PRONTO PAGO:</span>
-                            <span>-{((parseFloat(manualInvoiceForm.subtotal) || 0) * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                          </div>
-                          <div className="flex justify-between items-center text-gray-200 font-bold">
-                            <span>BASE IMPONIBLE NETA:</span>
-                            <span>{((parseFloat(manualInvoiceForm.subtotal) || 0) - ((parseFloat(manualInvoiceForm.subtotal) || 0) * 0.05)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                          </div>
-                        </>
-                      )}
-
-                      {manualInvoiceForm.retencion && (
-                        <div className="flex justify-between items-center text-red-400">
-                          <span>5% RETENCIÓN:</span>
-                          <span>-{((parseFloat(manualInvoiceForm.subtotal) || 0) * 0.05).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      {ppAmount > 0 && (
+                        <div className="flex justify-between items-center text-blue-400">
+                          <span>{ppRate}% PRONTO PAGO:</span>
+                          <span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                         </div>
                       )}
                       
-                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3">
+                      {descManual > 0 && (
+                        <div className="flex justify-between items-center text-purple-400">
+                          <span>DESCUENTO EXTRA:</span>
+                          <span>-{descManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {(ppAmount > 0 || descManual > 0) && (
+                        <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2">
+                          <span>BASE IMPONIBLE NETA:</span>
+                          <span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {manualInvoiceForm.retencion && (
+                        <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2">
+                          <span>5% RETENCIÓN:</span>
+                          <span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2">
                         <span>IVA 21%:</span>
-                        <span>{(((parseFloat(manualInvoiceForm.subtotal) || 0) - (manualInvoiceForm.prontoPago ? (parseFloat(manualInvoiceForm.subtotal) || 0) * 0.05 : 0)) * 0.21).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        <span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
                       </div>
                       
                       <div className="flex justify-between items-center pt-2 text-green-400">
                         <span className="font-black text-lg">A COBRAR:</span>
                         <span className="font-black text-2xl">
-                          {(((parseFloat(manualInvoiceForm.subtotal) || 0) - (manualInvoiceForm.prontoPago ? (parseFloat(manualInvoiceForm.subtotal) || 0)*0.05 : 0)) + (((parseFloat(manualInvoiceForm.subtotal) || 0) - (manualInvoiceForm.prontoPago ? (parseFloat(manualInvoiceForm.subtotal) || 0)*0.05 : 0))*0.21) - (manualInvoiceForm.retencion ? (parseFloat(manualInvoiceForm.subtotal) || 0)*0.05 : 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                          {totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €
                         </span>
                       </div>
                     </div>
@@ -1715,7 +1794,8 @@ export default function App() {
             </form>
           </div>
         </div>
-      )}
+      );
+      })()}
 
       {/* CONFIRMAR CIERRE */}
       {confirmCierre && (
@@ -1752,7 +1832,17 @@ export default function App() {
       )}
 
       {/* MODAL EDICIÓN DE FACTURAS */}
-      {editingFactura && (
+      {editingFactura && (() => {
+        const subtotal = parseFloat(editingFactura.subtotal) || 0;
+        const ppRate = parseFloat(editingFactura.prontoPagoTipo) || 0;
+        const ppAmount = subtotal * (ppRate / 100);
+        const descManual = parseFloat(editingFactura.descuentoManual) || 0;
+        const baseNet = subtotal - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = editingFactura.retencionEnabled ? subtotal * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col">
             <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1763,24 +1853,16 @@ export default function App() {
             <form onSubmit={async (e) => {
               e.preventDefault();
               try {
-                const subtotal = parseFloat(editingFactura.subtotal) || 0;
-                
-                const prontoPagoAmount = editingFactura.prontoPagoEnabled ? subtotal * 0.05 : 0;
-                const baseImponibleNeta = subtotal - prontoPagoAmount;
-                const ivaAmount = baseImponibleNeta * 0.21;
-                
-                const retencionAmount = editingFactura.retencionEnabled ? subtotal * 0.05 : 0;
-                
-                const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
-
                 await updateDoc(doc(db, "facturas", editingFactura.id), {
                   fecha: editingFactura.fecha,
                   contrato: editingFactura.contrato || '',
                   pedido: editingFactura.pedido || '',
                   cliente: editingFactura.cliente,
                   subtotal: subtotal,
-                  retencion: retencionAmount,
-                  prontoPago: prontoPagoAmount,
+                  retencion: retAmount,
+                  prontoPago: ppAmount,
+                  prontoPagoTipo: ppRate,
+                  descuentoManual: descManual,
                   iva: ivaAmount,
                   total: totalAmount
                 });
@@ -1835,15 +1917,29 @@ export default function App() {
               <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3 mt-2">
                  <h4 className="font-bold text-gray-700 border-b pb-2 text-sm uppercase">Condiciones Comerciales</h4>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors md:col-span-2">
                      <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={editingFactura.retencionEnabled} onChange={e => setEditingFactura({...editingFactura, retencionEnabled: e.target.checked})} />
                      <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
                    </label>
-                   <label className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={editingFactura.prontoPagoEnabled} onChange={e => setEditingFactura({...editingFactura, prontoPagoEnabled: e.target.checked})} />
-                     <div><span className="font-bold text-blue-900 block text-sm">Aplicar 5% Pronto Pago</span></div>
-                   </label>
+                   
+                   <InputGroup label="Descuento Pronto Pago">
+                     <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={editingFactura.prontoPagoTipo} onChange={e => setEditingFactura({...editingFactura, prontoPagoTipo: e.target.value})}>
+                       <option value="0">Ninguno (0%)</option>
+                       <option value="2.5">Aplicar 2,5%</option>
+                       <option value="5">Aplicar 5%</option>
+                     </select>
+                   </InputGroup>
+                   
+                   <InputGroup label="Descuento Manual (€)">
+                     <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={editingFactura.descuentoManual} onChange={e => setEditingFactura({...editingFactura, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                   </InputGroup>
                  </div>
+              </div>
+              
+              <div className="bg-gray-100 p-4 rounded-lg flex justify-between items-center text-sm font-medium border border-gray-200">
+                <span className="text-gray-600">Base Neta: {baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-gray-600">IVA: {ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-green-700 font-bold text-lg">Total: {totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
 
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-2">
@@ -1853,7 +1949,8 @@ export default function App() {
             </form>
           </div>
         </div>
-      )}
+      );
+      })()}
 
       {/* MODAL EDICIÓN RETENCIÓN MANUAL */}
       {editingRetencion && (
