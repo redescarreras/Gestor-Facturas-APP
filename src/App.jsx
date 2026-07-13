@@ -1270,14 +1270,14 @@ export default function App() {
                              <td className="py-1 px-2 font-mono font-bold text-gray-700">{o.idCarreras}</td>
                              <td className="py-1 px-2 flex items-center gap-2">
                                <span className={isFacturado ? "font-bold text-gray-800" : "text-gray-300 italic"}>{o.numFactura || "Pendiente"}</span>
-                               {!isFacturado && <button onClick={() => handleUpdateFacturaCiclo(o.id, o.numFactura)} className="text-blue-600 hover:text-blue-800 p-1 no-print"><Edit size={12}/></button>}
+                               <button onClick={() => handleUpdateFacturaCiclo(o.id, o.numFactura)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Nº Factura"><Edit size={12}/></button>
                              </td>
                              <td className="py-1 px-2">{o.central}</td>
                              <td className="py-1 px-2">{o.nombre}</td>
                              <td className="py-1 px-2 text-right">
                                 <div className="flex items-center justify-end gap-2 text-gray-500">
                                    <span className="font-medium">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                                   {!isFacturado && <button onClick={() => handleUpdateImporteCiclo(o.id, o.importe)} className="text-blue-600 hover:text-blue-800 p-1 no-print"><Edit size={12}/></button>}
+                                   <button onClick={() => handleUpdateImporteCiclo(o.id, o.importe)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Importe"><Edit size={12}/></button>
                                 </div>
                              </td>
                              <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
