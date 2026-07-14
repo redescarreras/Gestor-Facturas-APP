@@ -630,7 +630,16 @@ export default function App() {
 
   const handleEdit = (obra) => {
     setEditingObra(obra);
-    setFormData(obra);
+    
+    // PREVENCIÓN: Evitar que campos vacíos antiguos rompan el formulario
+    const safeObra = { ...initialObraState };
+    Object.keys(obra).forEach(key => {
+      if (obra[key] !== undefined && obra[key] !== null) safeObra[key] = obra[key];
+    });
+    
+    if (safeObra.fecha) safeObra.fecha = safeObra.fecha.split('T')[0];
+
+    setFormData(safeObra);
     setModalOpen(true);
   };
 
