@@ -238,6 +238,93 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
+  // --- CÁLCULOS SEGUROS PARA FACTURAS Y MODALES ---
+  const subtotalFactura = useMemo(() => {
+    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
+    return selectedForInvoice.reduce((sum, id) => {
+      const o = viewCiclo.obras.find(x => x.id === id);
+      if(!o) return sum;
+      const base = parseFloat(o.importe) || 0;
+      const plus = o.tieneRetencion ? base * 0.05 : 0;
+      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+      return sum + base + plus + uuii;
+    }, 0);
+  }, [selectedForInvoice, viewCiclo]);
+
+  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
+
+  // Calculos Factura Oficial
+  const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
+  const ppAmount = effectiveSubtotalDisplay * (ppRate / 100);
+  const descManualAmount = parseFloat(invoiceForm.descuentoManual) || 0;
+  const baseNet = effectiveSubtotalDisplay - ppAmount - descManualAmount;
+  const ivaAmount = baseNet * 0.21;
+  const retAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0;
+  const totalAmount = baseNet + ivaAmount - retAmount;
+
+  // Calculos Factura Manual
+  const manualSubtotal = parseFloat(manualInvoiceForm.subtotal) || 0;
+  const manualPpRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
+  const manualPpAmount = manualSubtotal * (manualPpRate / 100);
+  const manualDescManual = parseFloat(manualInvoiceForm.descuentoManual) || 0;
+  const manualBaseNet = manualSubtotal - manualPpAmount - manualDescManual;
+  const manualIvaAmount = manualBaseNet * 0.21;
+  const manualRetAmount = manualInvoiceForm.retencion ? manualSubtotal * 0.05 : 0;
+  const manualTotalAmount = manualBaseNet + manualIvaAmount - manualRetAmount;
+
+  // Calculos Edición Factura
+  const editSubtotal = editingFactura ? (parseFloat(editingFactura.subtotal) || 0) : 0;
+  const editPpRate = editingFactura ? (parseFloat(editingFactura.prontoPagoTipo) || 0) : 0;
+  const editPpAmount = editSubtotal * (editPpRate / 100);
+  const editDescManual = editingFactura ? (parseFloat(editingFactura.descuentoManual) || 0) : 0;
+  const editBaseNet = editSubtotal - editPpAmount - editDescManual;
+  const editIvaAmount = editBaseNet * 0.21;
+  const editRetAmount = (editingFactura && editingFactura.retencionEnabled) ? editSubtotal * 0.05 : 0;
+  const editTotalAmount = editBaseNet + editIvaAmount - editRetAmount;
+
+  // Cálculos para Reportes Múltiples de Facturas
+  const clientesDisponibles = useMemo(() => [...new Set(facturas.map(f => f.cliente?.nombre).filter(Boolean))], [facturas]);
+  const facturasFiltradasReport = useMemo(() => facturas.filter(f => {
+    if (facturasReportClientFilter === 'Todos') return true;
+    return f.cliente?.nombre === facturasReportClientFilter;
+  }), [facturas, facturasReportClientFilter]);
+  
+  const todasFacturasSeleccionadas = facturasFiltradasReport.length > 0 && facturasFiltradasReport.every(f => selectedFacturasReport.includes(f.id));
+
+  // Cálculos para Reportes Múltiples de Ciclos
+  const mesesDisponibles = useMemo(() => [...new Set(ciclos.map(c => new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})))], [ciclos]);
+  const ciclosFiltradosReport = useMemo(() => ciclos.filter(c => {
+    if (reportMonthFilter === 'Todos') return true;
+    return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
+  }), [ciclos, reportMonthFilter]);
+  
+  const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
+
+  // Totales de Impresión
+  const facturasPrintTotals = useMemo(() => {
+    if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
+    return facturasToPrint.reduce((acc, f) => {
+      const bNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+      return { base: acc.base + bNet, iva: acc.iva + f.iva, total: acc.total + f.total };
+    }, { base: 0, iva: 0, total: 0 });
+  }, [facturasToPrint]);
+
+  const ciclosPrintTotals = useMemo(() => {
+    if (!multiCicloToPrint) return { expedientes: 0, base: 0, retenciones: 0, final: 0 };
+    return multiCicloToPrint.reduce((acc, c) => {
+      let exp = 0, b = 0, ret = 0, fin = 0;
+      (c.obras || []).forEach(o => {
+        exp++;
+        const base = parseFloat(o.importe) || 0;
+        const plus = o.tieneRetencion ? base * 0.05 : 0;
+        const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+        b += base; ret += plus; fin += (base + plus + uuii);
+      });
+      return { expedientes: acc.expedientes + exp, base: acc.base + b, retenciones: acc.retenciones + ret, final: acc.final + fin };
+    }, { expedientes: 0, base: 0, retenciones: 0, final: 0 });
+  }, [multiCicloToPrint]);
+
+  // --- FUNCIONES PRINCIPALES ---
   const handleSaveObra = async (e) => {
     e.preventDefault();
     if (!user) return showToast("Esperando conexión...", "info");
@@ -281,9 +368,7 @@ export default function App() {
 
   const handleCerrarCiclo = async () => {
     if (!user) return;
-    
     const obrasPendientes = obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa));
-    
     if (obrasPendientes.length === 0) return showToast(`No hay obras pendientes ${cierreEmpresa !== 'Todas' ? `para ${cierreEmpresa}` : ''}.`, "warning");
 
     setConfirmCierre(false);
@@ -302,12 +387,8 @@ export default function App() {
       const nombreCiclo = `${prefix} - ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'short', year: 'numeric'})}`;
       
       const cicloRef = await addDoc(collection(db, "ciclos"), {
-        nombre: nombreCiclo, 
-        fecha: new Date().toISOString(), 
-        obras: obrasSanitizadas, 
-        totalObras: obrasSanitizadas.length, 
-        creadoPor: user.uid,
-        empresaCierre: cierreEmpresa 
+        nombre: nombreCiclo, fecha: new Date().toISOString(), obras: obrasSanitizadas, totalObras: obrasSanitizadas.length, 
+        creadoPor: user.uid, empresaCierre: cierreEmpresa 
       });
 
       let batch = writeBatch(db);
@@ -325,38 +406,12 @@ export default function App() {
     }
   };
 
-  const subtotalFactura = useMemo(() => {
-    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
-    return selectedForInvoice.reduce((sum, id) => {
-      const o = viewCiclo.obras.find(x => x.id === id);
-      if(!o) return sum;
-      const base = parseFloat(o.importe) || 0;
-      const plus = o.tieneRetencion ? base * 0.05 : 0;
-      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-      return sum + base + plus + uuii;
-    }, 0);
-  }, [selectedForInvoice, viewCiclo]);
-
-  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
-
   const handleCreateFactura = async (e) => {
     e.preventDefault();
     if (!invoiceForm.numFactura.trim()) return showToast("Falta número de factura", "warning");
 
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
-    
-    const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
-    const prontoPagoAmount = effectiveSubtotalDisplay * (ppRate / 100);
-    const descManualAmount = parseFloat(invoiceForm.descuentoManual) || 0;
-    
-    const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount - descManualAmount;
-    const ivaAmount = baseImponibleNeta * 0.21;
-    
-    const retencionAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0; 
-    
-    const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
-
     const obrasDetalle = selectedForInvoice.map(id => {
       const o = viewCiclo.obras.find(x => x.id === id);
       const base = parseFloat(o.importe) || 0;
@@ -365,48 +420,29 @@ export default function App() {
     });
 
     const facturaDoc = {
-      numFactura: invoiceForm.numFactura,
-      fecha: invoiceForm.fecha,
-      contrato: invoiceForm.numContrato,
-      pedido: invoiceForm.numPedido,
-      cliente: clienteData,
-      obras: obrasDetalle,
-      subtotal: effectiveSubtotalDisplay,
-      retencion: retencionAmount,
-      retencionSolicitada: false,
-      prontoPago: prontoPagoAmount,
-      prontoPagoTipo: ppRate,
-      descuentoManual: descManualAmount,
-      iva: ivaAmount,
-      total: totalAmount,
-      formaPago: invoiceForm.formaPago,
-      cicloId: viewCiclo.id,
-      createdAt: new Date().toISOString()
+      numFactura: invoiceForm.numFactura, fecha: invoiceForm.fecha, contrato: invoiceForm.numContrato,
+      pedido: invoiceForm.numPedido, cliente: clienteData, obras: obrasDetalle, subtotal: effectiveSubtotalDisplay,
+      retencion: retAmount, retencionSolicitada: false, prontoPago: ppAmount, prontoPagoTipo: ppRate,
+      descuentoManual: descManualAmount, iva: ivaAmount, total: totalAmount, formaPago: invoiceForm.formaPago,
+      cicloId: viewCiclo.id, createdAt: new Date().toISOString()
     };
 
     try {
       await addDoc(collection(db, "facturas"), facturaDoc);
 
       let batch = writeBatch(db);
-      selectedForInvoice.forEach(obraId => {
-        batch.update(doc(db, "obras", obraId), { numFactura: invoiceForm.numFactura });
-      });
+      selectedForInvoice.forEach(obraId => batch.update(doc(db, "obras", obraId), { numFactura: invoiceForm.numFactura }));
 
-      const updatedObrasCiclo = viewCiclo.obras.map(o => 
-        selectedForInvoice.includes(o.id) ? { ...o, numFactura: invoiceForm.numFactura } : o
-      );
+      const updatedObrasCiclo = viewCiclo.obras.map(o => selectedForInvoice.includes(o.id) ? { ...o, numFactura: invoiceForm.numFactura } : o);
       batch.update(doc(db, "ciclos", viewCiclo.id), { obras: updatedObrasCiclo });
-
       await batch.commit();
 
       setInvoiceModalOpen(false);
       setSelectedForInvoice([]);
       setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); 
-      
       setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPagoTipo: '0', descuentoManual: '', usarImporteManual: false, importeManual: '' });
       showToast("Factura generada y asignada con éxito", "success");
       setActiveTab('facturas'); 
-      
     } catch (error) {
       console.error(error);
       showToast("Error al generar factura", "error");
@@ -419,54 +455,20 @@ export default function App() {
     if (!manualInvoiceForm.subtotal || parseFloat(manualInvoiceForm.subtotal) <= 0) return showToast("Falta importe bruto válido", "warning");
 
     showToast("Generando factura manual...", "info");
-    
     const clienteData = config.empresasFacturacion[manualInvoiceForm.clienteIdx] || { nombre: 'Cliente Genérico', cif: 'Desconocido', direccion: '' };
     
-    const subtotal = parseFloat(manualInvoiceForm.subtotal);
-    const ppRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
-    const prontoPagoAmount = subtotal * (ppRate / 100);
-    const descManualAmount = parseFloat(manualInvoiceForm.descuentoManual) || 0;
-
-    const baseImponibleNeta = subtotal - prontoPagoAmount - descManualAmount;
-    const ivaAmount = baseImponibleNeta * 0.21;
-    const retencionAmount = manualInvoiceForm.retencion ? subtotal * 0.05 : 0; 
-    
-    const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
-
     const facturaDoc = {
-      numFactura: manualInvoiceForm.numFactura,
-      fecha: manualInvoiceForm.fecha,
-      contrato: manualInvoiceForm.numContrato,
-      pedido: manualInvoiceForm.numPedido,
-      cliente: clienteData,
-      obras: [], 
-      subtotal: subtotal,
-      retencion: retencionAmount,
-      retencionSolicitada: false,
-      prontoPago: prontoPagoAmount,
-      prontoPagoTipo: ppRate,
-      descuentoManual: descManualAmount,
-      iva: ivaAmount,
-      total: totalAmount,
-      formaPago: manualInvoiceForm.formaPago,
-      cicloId: 'manual', 
-      createdAt: new Date().toISOString()
+      numFactura: manualInvoiceForm.numFactura, fecha: manualInvoiceForm.fecha, contrato: manualInvoiceForm.numContrato,
+      pedido: manualInvoiceForm.numPedido, cliente: clienteData, obras: [], subtotal: manualSubtotal,
+      retencion: manualRetAmount, retencionSolicitada: false, prontoPago: manualPpAmount, prontoPagoTipo: manualPpRate,
+      descuentoManual: manualDescManual, iva: manualIvaAmount, total: manualTotalAmount, formaPago: manualInvoiceForm.formaPago,
+      cicloId: 'manual', createdAt: new Date().toISOString()
     };
 
     try {
       await addDoc(collection(db, "facturas"), facturaDoc);
-      
       setManualInvoiceModalOpen(false);
-      setManualInvoiceForm({
-        ...manualInvoiceForm, 
-        numFactura: '', 
-        numContrato: '', 
-        numPedido: '', 
-        subtotal: '',
-        retencion: true,
-        prontoPagoTipo: '0',
-        descuentoManual: ''
-      });
+      setManualInvoiceForm({ ...manualInvoiceForm, numFactura: '', numContrato: '', numPedido: '', subtotal: '', retencion: true, prontoPagoTipo: '0', descuentoManual: '' });
       showToast("Factura manual generada con éxito", "success");
     } catch (error) {
       console.error(error);
@@ -476,10 +478,7 @@ export default function App() {
 
   const printSpecificInvoice = (factura) => {
     setInvoiceToPrint(factura);
-    setTimeout(() => {
-      window.print();
-      setInvoiceToPrint(null);
-    }, 500);
+    setTimeout(() => { window.print(); setInvoiceToPrint(null); }, 500);
   };
 
   const handleSyncOldInvoices = async () => {
@@ -500,32 +499,16 @@ export default function App() {
               if (clienteConfig) clienteData = clienteConfig;
 
               newFacturasMap[obra.numFactura] = {
-                numFactura: obra.numFactura,
-                fecha: ciclo.fecha.split('T')[0],
-                contrato: obra.contrato || '',
-                pedido: '',
-                cliente: clienteData,
-                obras: [],
-                subtotal: 0,
-                retencion: 0,
-                retencionSolicitada: false,
-                prontoPago: 0,
-                prontoPagoTipo: 0,
-                descuentoManual: 0,
-                iva: 0,
-                total: 0,
-                formaPago: 'CONFIRMING A 120 DÍAS',
-                cicloId: ciclo.id,
-                createdAt: new Date().toISOString()
+                numFactura: obra.numFactura, fecha: ciclo.fecha.split('T')[0], contrato: obra.contrato || '',
+                pedido: '', cliente: clienteData, obras: [], subtotal: 0, retencion: 0, retencionSolicitada: false,
+                prontoPago: 0, prontoPagoTipo: 0, descuentoManual: 0, iva: 0, total: 0, formaPago: 'CONFIRMING A 120 DÍAS',
+                cicloId: ciclo.id, createdAt: new Date().toISOString()
               };
             }
 
             const base = parseFloat(obra.importe) || 0;
             const totalLinea = base + (obra.tieneRetencion ? base * 0.05 : 0) + ((parseFloat(obra.uuii) || 0) * 1.5);
-            
-            newFacturasMap[obra.numFactura].obras.push({
-              id: obra.id, idCarreras: obra.idCarreras, nombre: obra.nombre, total: totalLinea
-            });
+            newFacturasMap[obra.numFactura].obras.push({ id: obra.id, idCarreras: obra.idCarreras, nombre: obra.nombre, total: totalLinea });
             newFacturasMap[obra.numFactura].subtotal += totalLinea;
           }
         });
@@ -540,10 +523,8 @@ export default function App() {
       let count = 0;
       for (const f of facturasToCreate) {
         f.retencion = f.subtotal * 0.05; 
-        f.prontoPago = 0;
         f.iva = f.subtotal * 0.21;
         f.total = f.subtotal - f.retencion + f.iva;
-
         batch.set(doc(collection(db, "facturas")), f);
         if (++count >= 400) { await batch.commit(); batch = writeBatch(db); count = 0; }
       }
@@ -563,29 +544,9 @@ export default function App() {
         const hoy = new Date().toISOString().split('T')[0];
 
         let estadoRetencion = 'en_espera';
-        if (f.retencionSolicitada) {
-          estadoRetencion = 'solicitada';
-        } else if (hoy >= fechaElegibleStr) {
-          estadoRetencion = 'pendiente_solicitar';
-        }
-
+        if (f.retencionSolicitada) estadoRetencion = 'solicitada';
+        else if (hoy >= fechaElegibleStr) estadoRetencion = 'pendiente_solicitar';
         return { ...f, fechaElegibleStr, estadoRetencion };
-      })
-      .sort((a, b) => {
-        const getNum = (str) => {
-          const match = String(str || "").match(/\d+/);
-          return match ? parseInt(match[0], 10) : 0;
-        };
-        const numA = getNum(a.numFactura);
-        const numB = getNum(b.numFactura);
-        
-        if (numA === numB) {
-          const yearA = parseInt(String(a.numFactura || "0").split('-')[2] || "0", 10);
-          const yearB = parseInt(String(b.numFactura || "0").split('-')[2] || "0", 10);
-          return yearA - yearB;
-        }
-        
-        return numA - numB;
       });
   }, [facturas]);
 
@@ -597,14 +558,9 @@ export default function App() {
   const handleMarcarRetencion = async (id) => {
     if (!confirm("¿Confirmas que ya has reclamado el cobro de esta retención?")) return;
     try {
-      await updateDoc(doc(db, "facturas", id), { 
-        retencionSolicitada: true,
-        fechaSolicitudRetencion: new Date().toISOString()
-      });
+      await updateDoc(doc(db, "facturas", id), { retencionSolicitada: true, fechaSolicitudRetencion: new Date().toISOString() });
       showToast("Retención marcada como Solicitada", "success");
-    } catch (error) {
-      showToast("Error al actualizar la retención", "error");
-    }
+    } catch (error) { showToast("Error al actualizar la retención", "error"); }
   };
 
   const handleUpdateFacturaCiclo = async (obraId, currentFactura) => {
@@ -635,35 +591,33 @@ export default function App() {
 
   const handleDelete = async (id) => {
     if (confirm("⚠️ ¿Eliminar expediente?")) {
-      try {
-        await deleteDoc(doc(db, "obras", id));
-        showToast("Eliminado", "success");
-      } catch (error) { showToast("Error al eliminar", "error"); }
+      try { await deleteDoc(doc(db, "obras", id)); showToast("Eliminado", "success"); } 
+      catch (error) { showToast("Error al eliminar", "error"); }
     }
   };
 
-  // --- BOTÓN EDITAR COMPLETAMENTE REPARADO ---
+  // --- BOTÓN EDITAR (100% SEGURO) ---
   const handleEdit = (obra) => {
     try {
       setEditingObra(obra);
-      
       const safeObra = { ...initialObraState };
+      
       Object.keys(obra).forEach(key => {
         if (obra[key] !== undefined && obra[key] !== null) safeObra[key] = obra[key];
       });
       
-      // Control robusto de fechas antiguas para evitar que colapse el Modal
+      let fStr = new Date().toISOString().split('T')[0];
       if (safeObra.fecha) {
-          if (typeof safeObra.fecha === 'string') {
-              safeObra.fecha = safeObra.fecha.split('T')[0];
-          } else if (typeof safeObra.fecha.toDate === 'function') {
-              safeObra.fecha = safeObra.fecha.toDate().toISOString().split('T')[0];
-          } else if (safeObra.fecha instanceof Date) {
-              safeObra.fecha = safeObra.fecha.toISOString().split('T')[0];
-          }
-      } else {
-          safeObra.fecha = new Date().toISOString().split('T')[0];
+          try {
+              if (typeof safeObra.fecha === 'string') fStr = safeObra.fecha.split('T')[0];
+              else if (safeObra.fecha.toDate) fStr = safeObra.fecha.toDate().toISOString().split('T')[0];
+              else fStr = new Date(safeObra.fecha).toISOString().split('T')[0];
+          } catch(e) {}
       }
+      safeObra.fecha = fStr;
+
+      if (safeObra.importe !== undefined) safeObra.importe = safeObra.importe.toString();
+      if (safeObra.uuii !== undefined) safeObra.uuii = safeObra.uuii.toString();
 
       setFormData(safeObra);
       setModalOpen(true);
@@ -679,9 +633,8 @@ export default function App() {
     if (action === 'add') newList.push(value);
     else if (action === 'delete') newList = newList.filter(item => item !== value);
     setConfig(prev => ({ ...prev, [type]: newList }));
-    try {
-      await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList });
-    } catch (error) { showToast("Error config", 'error'); }
+    try { await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList }); } 
+    catch (error) { showToast("Error config", 'error'); }
   };
 
   const handleExportBackup = () => {
@@ -691,9 +644,7 @@ export default function App() {
     const link = document.createElement('a');
     link.href = url;
     link.download = `backup_Gestión_de_Obras_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const handleImportBackup = (e) => {
@@ -713,8 +664,7 @@ export default function App() {
         showToast(`Completado`, "success");
       } catch (error) { showToast("Archivo inválido", "error"); }
     };
-    reader.readAsText(file);
-    e.target.value = '';
+    reader.readAsText(file); e.target.value = '';
   };
 
   const sourceData = useMemo(() => {
@@ -750,7 +700,6 @@ export default function App() {
       }
       return matchSearch;
     });
-
     return filtered.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   }, [sourceData, searchQuery, activeTab, reportFilter, navState, viewCiclo]);
 
@@ -759,10 +708,7 @@ export default function App() {
     const iva = base * 0.21;
     const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
     const uuii = obrasFiltradas.reduce((acc, curr) => acc + ((parseFloat(curr.uuii) || 0) * 1.50), 0);
-    const totalConIva = base + iva + plus + uuii;
-    const totalSinIva = base + plus + uuii;
-    const totalBasePlus = base + plus;
-    return { base, iva, plus, uuii, totalConIva, totalSinIva, totalBasePlus };
+    return { base, iva, plus, uuii, totalConIva: base + iva + plus + uuii, totalSinIva: base + plus + uuii, totalBasePlus: base + plus };
   }, [obrasFiltradas]);
 
   const treeData = useMemo(() => {
@@ -816,169 +762,105 @@ export default function App() {
         .print-header, .invoice-wrapper { display: none; }
       `}</style>
 
-      {/* PLANTILLA REPORTE DE FACTURAS EMITIDAS */}
-      {facturasToPrint && (() => {
-        let totalBase = 0; let totalIva = 0; let totalCobrar = 0;
-        facturasToPrint.forEach(f => {
-          const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
-          totalBase += baseNet;
-          totalIva += f.iva;
-          totalCobrar += f.total;
-        });
-
-        return (
-          <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
-            <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
-              <div>
-                <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REPORTE DE FACTURACIÓN</h1>
-                <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">REDES CARRERAS S.L.</p>
-              </div>
-              <div className="text-right">
-                <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
-                <p className="text-sm text-gray-500">{facturasToPrint.length} Facturas Exportadas</p>
-              </div>
+      {/* PLANTILLAS IMPRESION */}
+      {facturasToPrint && (
+        <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
+          <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
+            <div>
+              <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REPORTE DE FACTURACIÓN</h1>
+              <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">REDES CARRERAS S.L.</p>
             </div>
-
-            <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Facturas</p><p className="font-black text-lg">{facturasToPrint.length}</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Neta</p><p className="font-bold text-lg text-gray-800">{totalBase.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma IVA (21%)</p><p className="font-bold text-lg text-blue-700">{totalIva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total A Cobrar</p><p className="font-black text-xl text-green-700">{totalCobrar.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            <div className="text-right">
+              <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
+              <p className="text-sm text-gray-500">{facturasToPrint.length} Facturas Exportadas</p>
             </div>
-
-            <table className="w-full invoice-table text-xs border-collapse">
-              <thead>
-                <tr>
-                  <th className="w-24">Nº Factura</th>
-                  <th className="w-24">Fecha</th>
-                  <th>Cliente</th>
-                  <th className="w-24 text-right">Base Neta</th>
-                  <th className="w-24 text-right">IVA</th>
-                  <th className="w-24 text-right">Retención</th>
-                  <th className="w-28 text-right bg-gray-100">A Cobrar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {facturasToPrint.length === 0 && <tr><td colSpan="7" className="text-center italic text-gray-500 py-2">Ninguna factura seleccionada</td></tr>}
-                {facturasToPrint.map(f => {
-                  const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
-                  return (
-                    <tr key={f.id} className="border-b border-gray-100">
-                      <td className="font-bold text-red-600">{f.numFactura}</td>
-                      <td className="text-gray-600">{new Date(f.fecha).toLocaleDateString()}</td>
-                      <td className="font-medium text-gray-800">{f.cliente.nombre}</td>
-                      <td className="text-right">{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                      <td className="text-right">{f.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                      <td className="text-right text-red-500">{f.retencion > 0 ? `-${f.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €` : '-'}</td>
-                      <td className="text-right font-black text-gray-900 bg-gray-50/50">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
           </div>
-        );
-      })()}
-
-      {/* PLANTILLA DE REPORTE DE CICLOS MÚLTIPLES PARA IMPRESIÓN */}
-      {multiCicloToPrint && (() => {
-        let totalExpedientes = 0; let totalBase = 0; let totalRetenciones = 0; let totalFinal = 0;
-        multiCicloToPrint.forEach(c => {
-          (c.obras || []).forEach(o => {
-            totalExpedientes++;
-            const b = parseFloat(o.importe) || 0;
-            const p = o.tieneRetencion ? b * 0.05 : 0;
-            const u = (parseFloat(o.uuii) || 0) * 1.5;
-            totalBase += b; totalRetenciones += p; totalFinal += (b + p + u);
-          });
-        });
-
-        return (
-          <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
-            <div className="flex justify-between border-b-2 border-gray-800 pb-4 mb-6 items-end">
-              <div>
-                <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none mb-1">REPORTE DE CICLOS</h1>
-                <p className="font-bold text-sm text-gray-500 uppercase tracking-widest">REDES CARRERAS S.L.</p>
-              </div>
-              <div className="text-right">
-                <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
-                <p className="text-sm text-gray-500">{multiCicloToPrint.length} Ciclos Exportados</p>
-              </div>
-            </div>
-
-            <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Expedientes</p><p className="font-black text-lg">{totalExpedientes}</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Imponible</p><p className="font-bold text-lg text-gray-800">{totalBase.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Retenciones (5%)</p><p className="font-bold text-lg text-blue-700">{totalRetenciones.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Valor Total (Con Plus)</p><p className="font-black text-xl text-green-700">{totalFinal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-            </div>
-
-            {multiCicloToPrint.map(ciclo => (
-              <div key={ciclo.id} className="mb-8 break-inside-avoid">
-                <div className="flex justify-between items-end border-b-2 border-gray-300 pb-2 mb-3">
-                  <h3 className="font-bold text-lg text-gray-800 uppercase">{ciclo.nombre}</h3>
-                  <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">{new Date(ciclo.fecha).toLocaleDateString('es-ES')}</span>
-                </div>
-                <table className="w-full invoice-table text-xs border-collapse">
-                  <thead>
-                    <tr>
-                      <th className="w-20">Fecha</th>
-                      <th className="w-24">ID Carreras</th>
-                      <th>Central / Obra</th>
-                      <th className="w-24 text-right">Base</th>
-                      <th className="w-24 text-right">Total 5% Incl.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(ciclo.obras || []).length === 0 && <tr><td colSpan="5" className="text-center italic text-gray-500 py-2">Ciclo vacío</td></tr>}
-                    {(ciclo.obras || []).map(o => {
-                      const base = parseFloat(o.importe) || 0;
-                      const plus = o.tieneRetencion ? base * 0.05 : 0;
-                      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-                      const final = base + plus + uuii;
-                      return (
-                        <tr key={o.id} className="border-b border-gray-100">
-                          <td className="text-gray-600">{new Date(o.fecha).toLocaleDateString()}</td>
-                          <td className="font-mono font-bold">{o.idCarreras}</td>
-                          <td><span className="font-bold">{o.central}</span> - {o.nombre}</td>
-                          <td className="text-right">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                          <td className="text-right font-bold text-gray-900">{final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+          <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Facturas</p><p className="font-black text-lg">{facturasToPrint.length}</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Neta</p><p className="font-bold text-lg text-gray-800">{facturasPrintTotals.base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma IVA (21%)</p><p className="font-bold text-lg text-blue-700">{facturasPrintTotals.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total A Cobrar</p><p className="font-black text-xl text-green-700">{facturasPrintTotals.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
           </div>
-        );
-      })()}
+          <table className="w-full invoice-table text-xs border-collapse">
+            <thead>
+              <tr>
+                <th className="w-24">Nº Factura</th><th className="w-24">Fecha</th><th>Cliente</th>
+                <th className="w-24 text-right">Base Neta</th><th className="w-24 text-right">IVA</th>
+                <th className="w-24 text-right">Retención</th><th className="w-28 text-right bg-gray-100">A Cobrar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {facturasToPrint.map(f => {
+                const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+                return (
+                  <tr key={f.id} className="border-b border-gray-100">
+                    <td className="font-bold text-red-600">{f.numFactura}</td><td className="text-gray-600">{new Date(f.fecha).toLocaleDateString()}</td><td className="font-medium text-gray-800">{f.cliente.nombre}</td>
+                    <td className="text-right">{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td><td className="text-right">{f.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                    <td className="text-right text-red-500">{f.retencion > 0 ? `-${f.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €` : '-'}</td>
+                    <td className="text-right font-black text-gray-900 bg-gray-50/50">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* PLANTILLA DE FACTURA PARA IMPRESIÓN */}
+      {multiCicloToPrint && (
+        <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
+          <div className="flex justify-between border-b-2 border-gray-800 pb-4 mb-6 items-end">
+            <div>
+              <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none mb-1">REPORTE DE CICLOS</h1>
+              <p className="font-bold text-sm text-gray-500 uppercase tracking-widest">REDES CARRERAS S.L.</p>
+            </div>
+            <div className="text-right">
+              <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
+              <p className="text-sm text-gray-500">{multiCicloToPrint.length} Ciclos Exportados</p>
+            </div>
+          </div>
+          <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Expedientes</p><p className="font-black text-lg">{ciclosPrintTotals.expedientes}</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Imponible</p><p className="font-bold text-lg text-gray-800">{ciclosPrintTotals.base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Retenciones (5%)</p><p className="font-bold text-lg text-blue-700">{ciclosPrintTotals.retenciones.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Valor Total (Con Plus)</p><p className="font-black text-xl text-green-700">{ciclosPrintTotals.final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+          </div>
+          {multiCicloToPrint.map(ciclo => (
+            <div key={ciclo.id} className="mb-8 break-inside-avoid">
+              <div className="flex justify-between items-end border-b-2 border-gray-300 pb-2 mb-3">
+                <h3 className="font-bold text-lg text-gray-800 uppercase">{ciclo.nombre}</h3>
+                <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">{new Date(ciclo.fecha).toLocaleDateString('es-ES')}</span>
+              </div>
+              <table className="w-full invoice-table text-xs border-collapse">
+                <thead><tr><th className="w-20">Fecha</th><th className="w-24">ID Carreras</th><th>Central / Obra</th><th className="w-24 text-right">Base</th><th className="w-24 text-right">Total 5% Incl.</th></tr></thead>
+                <tbody>
+                  {(ciclo.obras || []).length === 0 && <tr><td colSpan="5" className="text-center italic text-gray-500 py-2">Ciclo vacío</td></tr>}
+                  {(ciclo.obras || []).map(o => {
+                    const base = parseFloat(o.importe) || 0;
+                    const plus = o.tieneRetencion ? base * 0.05 : 0;
+                    const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+                    const final = base + plus + uuii;
+                    return (
+                      <tr key={o.id} className="border-b border-gray-100">
+                        <td className="text-gray-600">{new Date(o.fecha).toLocaleDateString()}</td><td className="font-mono font-bold">{o.idCarreras}</td><td><span className="font-bold">{o.central}</span> - {o.nombre}</td>
+                        <td className="text-right">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td><td className="text-right font-bold text-gray-900">{final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
       {invoiceToPrint && (
         <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50">
           <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
-            <div>
-              <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REDES CARRERAS S.L.</h1>
-              <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">Telecomunicaciones</p>
-            </div>
+            <div><h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REDES CARRERAS S.L.</h1><p className="font-bold text-sm text-gray-700 uppercase tracking-widest">Telecomunicaciones</p></div>
           </div>
           <div className="flex justify-between mb-10 text-sm">
-            <div className="w-5/12">
-              <h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Empresa</h3>
-              <p className="font-bold text-base mb-1">REDES CARRERAS S.L.</p>
-              <p>CIF: B87152963</p>
-              <p>CALLE LAGUNA DEL MARQUESADO</p>
-              <p>Nº.30 NAVE: D</p>
-              <p>MADRID, CP: 28021</p>
-              <p>TEL: 630241775</p>
-            </div>
-            <div className="w-5/12">
-              <h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Facturar A</h3>
-              <p className="font-bold text-base mb-1">{invoiceToPrint.cliente.nombre}</p>
-              <p>CIF: {invoiceToPrint.cliente.cif}</p>
-              <p className="whitespace-pre-line leading-relaxed">{invoiceToPrint.cliente.direccion}</p>
-            </div>
+            <div className="w-5/12"><h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Empresa</h3><p className="font-bold text-base mb-1">REDES CARRERAS S.L.</p><p>CIF: B87152963</p><p>CALLE LAGUNA DEL MARQUESADO</p><p>Nº.30 NAVE: D</p><p>MADRID, CP: 28021</p><p>TEL: 630241775</p></div>
+            <div className="w-5/12"><h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Facturar A</h3><p className="font-bold text-base mb-1">{invoiceToPrint.cliente.nombre}</p><p>CIF: {invoiceToPrint.cliente.cif}</p><p className="whitespace-pre-line leading-relaxed">{invoiceToPrint.cliente.direccion}</p></div>
           </div>
           <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-2 gap-y-3 border border-gray-200 text-sm">
             {invoiceToPrint.contrato && <p><span className="font-bold text-gray-600">N.º DE CONTRATO:</span> <span className="font-medium">{invoiceToPrint.contrato}</span></p>}
@@ -987,81 +869,33 @@ export default function App() {
             <p><span className="font-bold text-gray-600">Fecha de Emisión:</span> <span className="font-medium">{new Date(invoiceToPrint.fecha).toLocaleDateString('es-ES')}</span></p>
           </div>
           <table className="w-full invoice-table mb-10 text-sm border-collapse">
-            <thead>
-              <tr>
-                <th className="w-12 text-center text-gray-600">N.º</th>
-                <th className="text-gray-600">Descripción de los Trabajos (ID - Obra)</th>
-                <th className="w-32 text-right text-gray-600">Importe</th>
-              </tr>
-            </thead>
+            <thead><tr><th className="w-12 text-center text-gray-600">N.º</th><th className="text-gray-600">Descripción de los Trabajos (ID - Obra)</th><th className="w-32 text-right text-gray-600">Importe</th></tr></thead>
             <tbody>
-              {invoiceToPrint.obras.length === 0 && (
-                <tr className="border-b border-gray-100"><td colSpan="3" className="text-center py-4 text-gray-500 italic">Factura generada manualmente</td></tr>
-              )}
+              {invoiceToPrint.obras.length === 0 && <tr className="border-b border-gray-100"><td colSpan="3" className="text-center py-4 text-gray-500 italic">Factura generada manualmente</td></tr>}
               {invoiceToPrint.obras.map((obra, idx) => (
                 <tr key={idx} className="border-b border-gray-100">
-                  <td className="text-center font-bold text-gray-400">{idx + 1}</td>
-                  <td>
-                    <span className="font-mono text-gray-600 mr-2">{obra.idCarreras}</span> 
-                    <span className="font-medium">{obra.nombre}</span>
-                  </td>
-                  <td className="text-right font-medium">{obra.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                  <td className="text-center font-bold text-gray-400">{idx + 1}</td><td><span className="font-mono text-gray-600 mr-2">{obra.idCarreras}</span><span className="font-medium">{obra.nombre}</span></td><td className="text-right font-medium">{obra.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="flex justify-end mb-10">
             <div className="w-80 bg-gray-50/50 border border-gray-300 p-4 rounded-lg text-sm">
-              <div className="flex justify-between font-bold border-b border-gray-200 pb-2 mb-3">
-                <span className="text-gray-600">TOTAL BRUTO:</span>
-                <span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-              </div>
-              
-              {invoiceToPrint.prontoPago > 0 && (
-                <div className="flex justify-between mb-2 text-blue-600 font-medium border-b border-gray-100 pb-2">
-                  <span>{invoiceToPrint.prontoPagoTipo || 5}% PRONTO PAGO:</span>
-                  <span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                </div>
-              )}
-              {invoiceToPrint.descuentoManual > 0 && (
-                <div className="flex justify-between mb-2 text-purple-600 font-medium border-b border-gray-100 pb-2">
-                  <span>DESCUENTO MANUAL:</span>
-                  <span>-{invoiceToPrint.descuentoManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                </div>
-              )}
-              {(invoiceToPrint.prontoPago > 0 || invoiceToPrint.descuentoManual > 0) && (
-                <div className="flex justify-between font-bold mb-3 text-gray-700">
-                  <span>BASE IMPONIBLE NETA:</span>
-                  <span>{(invoiceToPrint.subtotal - (invoiceToPrint.prontoPago || 0) - (invoiceToPrint.descuentoManual || 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                </div>
-              )}
-              
-              {invoiceToPrint.retencion > 0 && (
-                <div className="flex justify-between mb-2 text-red-600 font-medium mt-2">
-                  <span>5% RETENCIÓN:</span>
-                  <span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                </div>
-              )}
-              
-              <div className="flex justify-between mb-3 text-gray-700 font-medium mt-2">
-                <span>IVA 21%:</span>
-                <span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-              </div>
-              <div className="flex justify-between font-black text-lg border-t-2 border-red-600 pt-3 text-gray-900 mt-2">
-                <span>A COBRAR:</span>
-                <span>{invoiceToPrint.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-              </div>
+              <div className="flex justify-between font-bold border-b border-gray-200 pb-2 mb-3"><span className="text-gray-600">TOTAL BRUTO:</span><span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+              {invoiceToPrint.prontoPago > 0 && <div className="flex justify-between mb-2 text-blue-600 font-medium border-b border-gray-100 pb-2"><span>{invoiceToPrint.prontoPagoTipo || 5}% PRONTO PAGO:</span><span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+              {invoiceToPrint.descuentoManual > 0 && <div className="flex justify-between mb-2 text-purple-600 font-medium border-b border-gray-100 pb-2"><span>DESCUENTO MANUAL:</span><span>-{invoiceToPrint.descuentoManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+              {(invoiceToPrint.prontoPago > 0 || invoiceToPrint.descuentoManual > 0) && <div className="flex justify-between font-bold mb-3 text-gray-700"><span>BASE IMPONIBLE NETA:</span><span>{(invoiceToPrint.subtotal - (invoiceToPrint.prontoPago || 0) - (invoiceToPrint.descuentoManual || 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+              {invoiceToPrint.retencion > 0 && <div className="flex justify-between mb-2 text-red-600 font-medium mt-2"><span>5% RETENCIÓN:</span><span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+              <div className="flex justify-between mb-3 text-gray-700 font-medium mt-2"><span>IVA 21%:</span><span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+              <div className="flex justify-between font-black text-lg border-t-2 border-red-600 pt-3 text-gray-900 mt-2"><span>A COBRAR:</span><span>{invoiceToPrint.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
             </div>
           </div>
-          <div className="font-bold border-t-2 border-red-600 pt-4 text-sm text-gray-800">
-            <p>FORMA DE PAGO: <span className="font-black ml-2">{invoiceToPrint.formaPago}</span></p>
-          </div>
-          <p className="text-center text-[10px] text-gray-400 mt-16 pt-4 border-t border-gray-100">
-            Factura generada por Sistema de Facturación REDES CARRERAS S.L
-          </p>
+          <div className="font-bold border-t-2 border-red-600 pt-4 text-sm text-gray-800"><p>FORMA DE PAGO: <span className="font-black ml-2">{invoiceToPrint.formaPago}</span></p></div>
+          <p className="text-center text-[10px] text-gray-400 mt-16 pt-4 border-t border-gray-100">Factura generada por Sistema de Facturación REDES CARRERAS S.L</p>
         </div>
       )}
 
+      {/* INTERFAZ PRINCIPAL */}
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden hide-on-invoice-print">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
@@ -1083,10 +917,7 @@ export default function App() {
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
              <div><h1 className="text-3xl font-bold text-gray-900 leading-none">REDES CARRERAS S.L.</h1><p className="text-base text-gray-600 mt-1">Informe de Gestión</p></div>
           </div>
-          <div className="text-right text-xs text-gray-500">
-             <p className="font-bold">{new Date().toLocaleDateString()}</p>
-             {viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}
-          </div>
+          <div className="text-right text-xs text-gray-500"><p className="font-bold">{new Date().toLocaleDateString()}</p>{viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}</div>
         </div>
 
         <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10 no-print">
@@ -1130,7 +961,7 @@ export default function App() {
                   {!searchQuery && navState.empresa && (
                     <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
                       <div className="flex items-center gap-3"><button onClick={() => setNavState({...navState, encargado: null})} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><ArrowLeft size={20} /></button><div><h3 className="font-bold text-lg text-gray-800">{navState.encargado}</h3><p className="text-xs text-gray-500">{navState.empresa}</p></div></div>
-                      <div className="text-right"><p className="text-xs text-gray-500 uppercase">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600">{totales.totalSinIva.toLocaleString()} €</p></div>
+                      <div className="text-right"><p className="text-xs text-gray-500 uppercase">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600">{totales.totalSinIva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
                     </div>
                   )}
                   <div className="overflow-x-auto">
@@ -1165,7 +996,7 @@ export default function App() {
                       <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110"><Building size={80} /></div>
                       <div className="flex items-start justify-between mb-4"><div className="bg-red-50 p-3 rounded-xl text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors"><Folder size={28} strokeWidth={1.5} /></div></div>
                       <h3 className="text-lg font-bold text-gray-800 mb-1">{empresa}</h3><p className="text-xs text-gray-500 mb-4">{Object.keys(treeData[empresa].encargados).length} encargados</p>
-                      <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600 group-hover:text-red-700">{treeData[empresa].totalPendiente.toLocaleString()} €</p></div>
+                      <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase font-bold mb-1">Pendiente (Sin IVA)</p><p className="text-xl font-bold text-red-600 group-hover:text-red-700">{treeData[empresa].totalPendiente.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
                     </div>
                   ))}
                 </div>
@@ -1174,7 +1005,7 @@ export default function App() {
                   {Object.keys(treeData[navState.empresa]?.encargados || {}).map(encargado => (
                     <div key={encargado} onClick={() => setNavState({ ...navState, encargado })} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group">
                         <div className="flex items-center gap-4 mb-4"><div className="bg-blue-50 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><Users size={24} /></div><div><h4 className="font-bold text-gray-800">{encargado}</h4><p className="text-xs text-gray-500">Ver obras</p></div></div>
-                        <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span><span className="text-lg font-bold text-gray-900">{treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString()} €</span></div>
+                        <div className="bg-gray-50 p-3 rounded-lg flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">Pendiente (Sin IVA)</span><span className="text-lg font-bold text-gray-900">{treeData[navState.empresa].encargados[encargado].totalPendiente.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
                     </div>
                   ))}
                 </div>
@@ -1217,11 +1048,11 @@ export default function App() {
                     <div key={group} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-100 transition-all">
                       <div className="mb-2 sm:mb-0 w-1/4"><p className="font-bold text-gray-900">{group}</p><p className="text-xs text-gray-500">{data.count} expedientes</p></div>
                       <div className="text-right flex-1 flex justify-end gap-6 text-sm">
-                        <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString()} €</p></div>
-                        {!isEncargadoFilter && <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString()} €</p></div>}
-                        <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString()} €</p></div>
-                        {data.uuii > 0 && <div className="w-20"><p className="text-gray-400 text-xs">UUII</p><p className="font-medium text-purple-600">{data.uuii.toLocaleString()} €</p></div>}
-                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString()} €</p></div>
+                        <div className="w-24"><p className="text-gray-400 text-xs">Base</p><p className="font-medium">{data.base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+                        {!isEncargadoFilter && <div className="w-20"><p className="text-gray-400 text-xs">IVA</p><p className="font-medium text-blue-600">{data.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>}
+                        <div className="w-20"><p className="text-gray-400 text-xs">Plus</p><p className="font-medium text-blue-800">{data.plus.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+                        {data.uuii > 0 && <div className="w-20"><p className="text-gray-400 text-xs">UUII</p><p className="font-medium text-purple-600">{data.uuii.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>}
+                        <div className="w-24"><p className="text-gray-400 text-xs font-bold">Total</p><p className="font-bold text-green-700 text-lg">{(data.base + (isEncargadoFilter ? 0 : data.iva) + data.plus + (isEncargadoFilter ? 0 : data.uuii)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
                       </div>
                     </div>
                   ))}
@@ -1239,7 +1070,109 @@ export default function App() {
                          const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
                          const totalFila = base + plus + uuiiVal;
                          return (
-                           <tr key={o.id} className="border-b border-gray-50"><td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td><td className="py-1 px-2 font-mono">{o.idCarreras}</td><td className="py-1 px-2">{o.central}</td><td className="py-1 px-2">{o.nombre}</td><td className="py-1 px-2 font-medium text-gray-700">{o.encargado}</td><td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td><td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString()} €</td></tr>
+                           <tr key={o.id} className="border-b border-gray-50"><td className="py-1 px-2">{new Date(o.fecha).toLocaleDateString()}</td><td className="py-1 px-2 font-mono">{o.idCarreras}</td><td className="py-1 px-2">{o.central}</td><td className="py-1 px-2">{o.nombre}</td><td className="py-1 px-2 font-medium text-gray-700">{o.encargado}</td><td className="py-1 px-2 italic text-gray-500">{o.observaciones}</td><td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td></tr>
+                         )
+                       })}
+                     </tbody>
+                   </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'cierres' && !viewCiclo && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="flex justify-between items-center no-print">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Historial de Ciclos</h3>
+                  <p className="text-sm text-gray-500">Consulta los cierres pasados o genera uno nuevo.</p>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowReportModal(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95">
+                    <Download size={18} /> Exportar Reporte
+                  </button>
+                  <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
+                    <Lock size={18} /> Cerrar Ciclo Actual
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {ciclos.length === 0 && <p className="col-span-full text-center text-gray-400 py-12 bg-white rounded-xl border border-dashed border-gray-300">No hay ciclos cerrados todavía.</p>}
+                {ciclos.map(ciclo => (
+                  <div key={ciclo.id} onClick={() => setViewCiclo(ciclo)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg cursor-pointer transition-all group">
+                    <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-3 rounded-lg text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><History size={24}/></div><span className="text-xs text-gray-400 font-mono">{new Date(ciclo.fecha).toLocaleDateString()}</span></div>
+                    <h4 className="font-bold text-lg text-gray-800 mb-1">{ciclo.nombre}</h4><p className="text-sm text-gray-500 mb-4">{ciclo.totalObras} expedientes en lote</p>
+                    <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase">Total Valor (Sin IVA)</p><p className="text-xl font-bold text-gray-900">{(ciclo.obras || []).reduce((acc, o) => acc + (parseFloat(o.importe)||0), 0).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'cierres' && viewCiclo && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
+                <button onClick={() => setViewCiclo(null)} className="flex items-center gap-2 text-gray-600 hover:text-red-600 font-bold"><ArrowLeft size={18}/> Volver al Historial</button>
+                <div className="flex items-center gap-4">
+                  <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                  <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                  <button onClick={handlePrint} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-200 font-bold"><Printer size={16} /> Imprimir Lote</button>
+                  <button disabled={selectedForInvoice.length === 0} onClick={() => setInvoiceModalOpen(true)} className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})</button>
+                </div>
+              </div>
+
+              <div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end">
+                <h3 className="text-xl font-bold uppercase text-gray-800">{viewCiclo.nombre}</h3>
+                <p className="text-sm font-medium text-gray-500">Gestión de Cobro</p>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
+                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Expedientes disponibles para Facturar</h3>
+                   <table className="w-full text-xs text-left">
+                     <thead>
+                       <tr className="border-b bg-gray-50">
+                         <th className="py-2 px-2 text-center"><CheckSquare size={14} className="mx-auto text-gray-400"/></th>
+                         <th className="py-2 px-2">Fecha</th>
+                         <th className="py-2 px-2">ID</th>
+                         <th className="py-2 px-2">Nº Factura Asignado</th>
+                         <th className="py-2 px-2">Central</th>
+                         <th className="py-2 px-2">Obra</th>
+                         <th className="py-2 px-2 text-right">Base</th>
+                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {obrasFiltradas.map(o => {
+                         const base = parseFloat(o.importe) || 0;
+                         const plus = o.tieneRetencion ? base * 0.05 : 0;
+                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
+                         const totalFila = base + plus + uuiiVal;
+                         const isFacturado = !!o.numFactura;
+
+                         return (
+                           <tr key={o.id} className={`border-b border-gray-50 ${isFacturado ? 'bg-gray-50' : 'hover:bg-red-50'}`}>
+                             <td className="py-1 px-2 text-center">
+                               {isFacturado ? (
+                                 <span className="text-[9px] font-bold text-green-600 block leading-tight">YA<br/>EMITIDA</span>
+                               ) : (
+                                 <input type="checkbox" className="w-4 h-4 text-red-600 rounded cursor-pointer" checked={selectedForInvoice.includes(o.id)} onChange={(e) => { if (e.target.checked) setSelectedForInvoice([...selectedForInvoice, o.id]); else setSelectedForInvoice(selectedForInvoice.filter(id => id !== o.id)); }} />
+                               )}
+                             </td>
+                             <td className="py-1 px-2 text-gray-500">{new Date(o.fecha).toLocaleDateString()}</td>
+                             <td className="py-1 px-2 font-mono font-bold text-gray-700">{o.idCarreras}</td>
+                             <td className="py-1 px-2 flex items-center gap-2">
+                               <span className={isFacturado ? "font-bold text-gray-800" : "text-gray-300 italic"}>{o.numFactura || "Pendiente"}</span>
+                               <button onClick={() => handleUpdateFacturaCiclo(o.id, o.numFactura)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Nº Factura"><Edit size={12}/></button>
+                             </td>
+                             <td className="py-1 px-2">{o.central}</td>
+                             <td className="py-1 px-2">{o.nombre}</td>
+                             <td className="py-1 px-2 text-right">
+                                <div className="flex items-center justify-end gap-2 text-gray-500">
+                                   <span className="font-medium">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                                   <button onClick={() => handleUpdateImporteCiclo(o.id, o.importe)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Importe"><Edit size={12}/></button>
+                                </div>
+                             </td>
+                             <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                           </tr>
                          )
                        })}
                      </tbody>
@@ -1388,108 +1321,6 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'cierres' && !viewCiclo && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="flex justify-between items-center no-print">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-800">Historial de Ciclos</h3>
-                  <p className="text-sm text-gray-500">Consulta los cierres pasados o genera uno nuevo.</p>
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setShowReportModal(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95">
-                    <Download size={18} /> Exportar Reporte
-                  </button>
-                  <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
-                    <Lock size={18} /> Cerrar Ciclo Actual
-                  </button>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {ciclos.length === 0 && <p className="col-span-full text-center text-gray-400 py-12 bg-white rounded-xl border border-dashed border-gray-300">No hay ciclos cerrados todavía.</p>}
-                {ciclos.map(ciclo => (
-                  <div key={ciclo.id} onClick={() => setViewCiclo(ciclo)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-lg cursor-pointer transition-all group">
-                    <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-3 rounded-lg text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><History size={24}/></div><span className="text-xs text-gray-400 font-mono">{new Date(ciclo.fecha).toLocaleDateString()}</span></div>
-                    <h4 className="font-bold text-lg text-gray-800 mb-1">{ciclo.nombre}</h4><p className="text-sm text-gray-500 mb-4">{ciclo.totalObras} expedientes en lote</p>
-                    <div className="border-t border-gray-100 pt-3"><p className="text-xs text-gray-400 uppercase">Total Valor (Sin IVA)</p><p className="text-xl font-bold text-gray-900">{(ciclo.obras || []).reduce((acc, o) => acc + (parseFloat(o.importe)||0), 0).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'cierres' && viewCiclo && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
-                <button onClick={() => setViewCiclo(null)} className="flex items-center gap-2 text-gray-600 hover:text-red-600 font-bold"><ArrowLeft size={18}/> Volver al Historial</button>
-                <div className="flex items-center gap-4">
-                  <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
-                  <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
-                  <button onClick={handlePrint} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-200 font-bold"><Printer size={16} /> Imprimir Lote</button>
-                  <button disabled={selectedForInvoice.length === 0} onClick={() => setInvoiceModalOpen(true)} className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})</button>
-                </div>
-              </div>
-
-              <div className="mb-4 border-b-2 border-red-600 pb-2 flex justify-between items-end">
-                <h3 className="text-xl font-bold uppercase text-gray-800">{viewCiclo.nombre}</h3>
-                <p className="text-sm font-medium text-gray-500">Gestión de Cobro</p>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 card-resumen mt-6 break-page">
-                   <h3 className="font-bold text-lg mb-4 text-gray-800 border-b pb-2">Expedientes disponibles para Facturar</h3>
-                   <table className="w-full text-xs text-left">
-                     <thead>
-                       <tr className="border-b bg-gray-50">
-                         <th className="py-2 px-2 text-center"><CheckSquare size={14} className="mx-auto text-gray-400"/></th>
-                         <th className="py-2 px-2">Fecha</th>
-                         <th className="py-2 px-2">ID</th>
-                         <th className="py-2 px-2">Nº Factura Asignado</th>
-                         <th className="py-2 px-2">Central</th>
-                         <th className="py-2 px-2">Obra</th>
-                         <th className="py-2 px-2 text-right">Base</th>
-                         <th className="py-2 px-2 text-right">Total 5% Incl.</th>
-                       </tr>
-                     </thead>
-                     <tbody>
-                       {obrasFiltradas.map(o => {
-                         const base = parseFloat(o.importe) || 0;
-                         const plus = o.tieneRetencion ? base * 0.05 : 0;
-                         const uuiiVal = (parseFloat(o.uuii) || 0) * 1.50;
-                         const totalFila = base + plus + uuiiVal;
-                         const isFacturado = !!o.numFactura;
-
-                         return (
-                           <tr key={o.id} className={`border-b border-gray-50 ${isFacturado ? 'bg-gray-50' : 'hover:bg-red-50'}`}>
-                             <td className="py-1 px-2 text-center">
-                               {isFacturado ? (
-                                 <span className="text-[9px] font-bold text-green-600 block leading-tight">YA<br/>EMITIDA</span>
-                               ) : (
-                                 <input type="checkbox" className="w-4 h-4 text-red-600 rounded cursor-pointer" checked={selectedForInvoice.includes(o.id)} onChange={(e) => { if (e.target.checked) setSelectedForInvoice([...selectedForInvoice, o.id]); else setSelectedForInvoice(selectedForInvoice.filter(id => id !== o.id)); }} />
-                               )}
-                             </td>
-                             <td className="py-1 px-2 text-gray-500">{new Date(o.fecha).toLocaleDateString()}</td>
-                             <td className="py-1 px-2 font-mono font-bold text-gray-700">{o.idCarreras}</td>
-                             <td className="py-1 px-2 flex items-center gap-2">
-                               <span className={isFacturado ? "font-bold text-gray-800" : "text-gray-300 italic"}>{o.numFactura || "Pendiente"}</span>
-                               <button onClick={() => handleUpdateFacturaCiclo(o.id, o.numFactura)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Nº Factura"><Edit size={12}/></button>
-                             </td>
-                             <td className="py-1 px-2">{o.central}</td>
-                             <td className="py-1 px-2">{o.nombre}</td>
-                             <td className="py-1 px-2 text-right">
-                                <div className="flex items-center justify-end gap-2 text-gray-500">
-                                   <span className="font-medium">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                                   <button onClick={() => handleUpdateImporteCiclo(o.id, o.importe)} className="text-blue-600 hover:text-blue-800 p-1 no-print" title="Modificar Importe"><Edit size={12}/></button>
-                                </div>
-                             </td>
-                             <td className="py-1 px-2 text-right font-bold text-blue-900">{totalFila.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                           </tr>
-                         )
-                       })}
-                     </tbody>
-                   </table>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'ajustes' && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-10">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -1578,23 +1409,506 @@ export default function App() {
         </div>
       </main>
 
+      {/* --- MODALES O VENTANAS EMERGENTES --- */}
+
+      {/* MODAL OBRA */}
+      {modalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg">{editingObra ? 'Editar Expediente' : 'Nuevo Expediente'}</h3>
+              <button onClick={() => setModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+            </div>
+            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-5">
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <InputGroup label="ID Carreras *">
+                  <input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. 12345" />
+                </InputGroup>
+                <InputGroup label="ID Obra (Opcional)">
+                  <input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OB-001" />
+                </InputGroup>
+              </div>
+
+              <InputGroup label="Nombre / Descripción de los trabajos *">
+                <input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} placeholder="Descripción del trabajo..." />
+              </InputGroup>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <InputGroup label="Empresa (Cliente) *">
+                  <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.empresas?.map(emp => <option key={emp} value={emp}>{emp}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Encargado *">
+                  <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.encargados?.map(enc => <option key={enc} value={enc}>{enc}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Central / Zona">
+                  <input className="input-field" list="centrales-list" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})} placeholder="Buscar o escribir central..." />
+                  <datalist id="centrales-list">
+                    {[...(config.centrales || [])].filter(c => typeof c === 'string').sort((a, b) => a.localeCompare(b)).map(cen => (
+                      <option key={cen} value={cen} />
+                    ))}
+                  </datalist>
+                </InputGroup>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <InputGroup label="Contrato">
+                  <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
+                    <option value="">Seleccionar...</option>
+                    {config.contratos?.map(con => <option key={con} value={con}>{con}</option>)}
+                  </select>
+                </InputGroup>
+                <InputGroup label="Fecha *">
+                  <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
+                </InputGroup>
+                <InputGroup label="Importe Base (€) *">
+                  <input type="number" step="0.01" required className="input-field font-black text-gray-900 border-2 border-gray-300" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} />
+                </InputGroup>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <InputGroup label="UUII Extras (€)">
+                  <input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="0.00" />
+                </InputGroup>
+                <label className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors h-[42px]">
+                  <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
+                  <span className="font-bold text-gray-700 text-sm">Aplicar 5% Retención (Plus)</span>
+                </label>
+              </div>
+
+              <InputGroup label="Observaciones">
+                <textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} placeholder="Notas adicionales..." />
+              </InputGroup>
+
+              <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex justify-between items-center mt-2">
+                <span className="text-sm font-bold text-blue-800">Total Expediente (Base + 5% + UUII):</span>
+                <span className="text-lg font-black text-blue-900">
+                  {((parseFloat(formData.importe) || 0) + 
+                    (formData.tieneRetencion ? (parseFloat(formData.importe) || 0) * 0.05 : 0) + 
+                    ((parseFloat(formData.uuii) || 0) * 1.5)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                </span>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-2"><Save size={18}/> {editingObra ? 'Actualizar Obra' : 'Guardar Obra'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CREACIÓN FACTURA OFICIAL DESDE CICLO */}
+      {invoiceModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
+            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2"><Receipt size={22}/> Emisión de Factura</h3>
+                <p className="text-xs text-red-200">Se van a facturar {selectedForInvoice.length} expedientes.</p>
+              </div>
+              <button onClick={() => setInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={handleCreateFactura} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
+                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
+                    <select className="input-field border-gray-300 font-bold" value={invoiceForm.clienteIdx} onChange={e => setInvoiceForm({...invoiceForm, clienteIdx: e.target.value})}>
+                      {config.empresasFacturacion?.map((emp, i) => (
+                        <option key={i} value={i}>{emp.nombre}</option>
+                      ))}
+                    </select>
+                  </InputGroup>
+                  {config.empresasFacturacion && config.empresasFacturacion[invoiceForm.clienteIdx] && (
+                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
+                      <p><strong>CIF:</strong> {config.empresasFacturacion[invoiceForm.clienteIdx].cif}</p>
+                      <p className="whitespace-pre-line">{config.empresasFacturacion[invoiceForm.clienteIdx].direccion}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={invoiceForm.numFactura} onChange={e => setInvoiceForm({...invoiceForm, numFactura: e.target.value})} placeholder="Ej. 38-06-26" /></InputGroup>
+                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={invoiceForm.fecha} onChange={e => setInvoiceForm({...invoiceForm, fecha: e.target.value})} /></InputGroup>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={invoiceForm.numContrato} onChange={e => setInvoiceForm({...invoiceForm, numContrato: e.target.value})} placeholder="Ej. 509/86200" /></InputGroup>
+                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={invoiceForm.numPedido} onChange={e => setInvoiceForm({...invoiceForm, numPedido: e.target.value})} placeholder="Ej. PED-2026" /></InputGroup>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
+                   
+                   <InputGroup label="Forma de Pago Estipulada">
+                      <select className="input-field bg-gray-100 font-medium" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
+                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
+                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
+                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
+                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
+                      </select>
+                   </InputGroup>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={invoiceForm.retencion} onChange={e => setInvoiceForm({...invoiceForm, retencion: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
+                   </label>
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={invoiceForm.prontoPagoTipo} onChange={e => setInvoiceForm({...invoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option>
+                         <option value="2.5">Aplicar 2,5%</option>
+                         <option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={invoiceForm.descuentoManual} onChange={e => setInvoiceForm({...invoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
+
+                   <label className="flex items-center gap-3 p-3 mt-4 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-gray-600 rounded" checked={invoiceForm.usarImporteManual} onChange={e => {
+                        const isChecked = e.target.checked;
+                        setInvoiceForm({...invoiceForm, usarImporteManual: isChecked, importeManual: isChecked ? subtotalFactura : ''})
+                     }} />
+                     <div>
+                       <span className="font-bold text-gray-900 block text-sm">Modificar Importe Bruto Manualmente</span>
+                       <span className="text-[10px] text-gray-500 leading-none">Permite ajustar el importe base si sumas conceptos extra.</span>
+                     </div>
+                   </label>
+
+                   {invoiceForm.usarImporteManual && (
+                     <div className="pt-2 animate-in fade-in slide-in-from-top-2">
+                       <InputGroup label="Total Bruto Personalizado (€)">
+                         <input type="number" step="0.01" required={invoiceForm.usarImporteManual} className="input-field border-gray-300 font-bold text-lg text-gray-900" value={invoiceForm.importeManual} onChange={e => setInvoiceForm({...invoiceForm, importeManual: e.target.value})} />
+                       </InputGroup>
+                     </div>
+                   )}
+                 </div>
+
+                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
+                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
+                    <div className="space-y-3 font-mono text-sm">
+                      <div className="flex justify-between items-center text-gray-300">
+                        <span>TOTAL BRUTO:</span>
+                        <span className="font-bold text-white text-lg">{effectiveSubtotalDisplay.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      </div>
+                      {ppAmount > 0 && <div className="flex justify-between items-center text-blue-400"><span>{ppRate}% PRONTO PAGO:</span><span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {descManualAmount > 0 && <div className="flex justify-between items-center text-purple-400"><span>DESCUENTO EXTRA:</span><span>-{descManualAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {(ppAmount > 0 || descManualAmount > 0) && <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2"><span>BASE IMPONIBLE NETA:</span><span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {invoiceForm.retencion && <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2"><span>5% RETENCIÓN:</span><span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2"><span>IVA 21%:</span><span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                      <div className="flex justify-between items-center pt-2 text-green-400">
+                        <span className="font-black text-lg">A COBRAR:</span>
+                        <span className="font-black text-2xl">{totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      </div>
+                    </div>
+                 </div>
+              </div>
+              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
+                <p className="text-xs text-gray-500 italic">* Revisa que el Nº Factura no exista previamente. Esta acción es irreversible.</p>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
+                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Emitir Factura Oficial</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AÑADIR FACTURA MANUAL */}
+      {manualInvoiceModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
+            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2"><Plus size={22}/> Añadir Factura Manual</h3>
+                <p className="text-xs text-red-200">Rellena huecos de facturación. Si marcas retención, aparecerá en tu listado.</p>
+              </div>
+              <button onClick={() => setManualInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={handleCreateManualInvoice} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
+                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
+                    <select className="input-field border-gray-300 font-bold" value={manualInvoiceForm.clienteIdx} onChange={e => setManualInvoiceForm({...manualInvoiceForm, clienteIdx: e.target.value})}>
+                      {config.empresasFacturacion?.map((emp, i) => (
+                        <option key={i} value={i}>{emp.nombre}</option>
+                      ))}
+                    </select>
+                  </InputGroup>
+                  {config.empresasFacturacion && config.empresasFacturacion[manualInvoiceForm.clienteIdx] && (
+                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
+                      <p><strong>CIF:</strong> {config.empresasFacturacion[manualInvoiceForm.clienteIdx].cif}</p>
+                      <p className="whitespace-pre-line">{config.empresasFacturacion[manualInvoiceForm.clienteIdx].direccion}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={manualInvoiceForm.numFactura} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numFactura: e.target.value})} placeholder="Ej. 02-01-26" /></InputGroup>
+                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={manualInvoiceForm.fecha} onChange={e => setManualInvoiceForm({...manualInvoiceForm, fecha: e.target.value})} /></InputGroup>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={manualInvoiceForm.numContrato} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numContrato: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={manualInvoiceForm.numPedido} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numPedido: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Importes y Condiciones</h4>
+                   
+                   <InputGroup label="Importe Bruto (€) *">
+                     <input type="number" step="0.01" required className="input-field border-gray-300 font-bold text-lg text-gray-900" value={manualInvoiceForm.subtotal} onChange={e => setManualInvoiceForm({...manualInvoiceForm, subtotal: e.target.value})} placeholder="0.00" />
+                   </InputGroup>
+
+                   <InputGroup label="Forma de Pago Estipulada">
+                      <select className="input-field bg-gray-100 font-medium" value={manualInvoiceForm.formaPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, formaPago: e.target.value})}>
+                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
+                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
+                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
+                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
+                      </select>
+                   </InputGroup>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors mt-2">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={manualInvoiceForm.retencion} onChange={e => setManualInvoiceForm({...manualInvoiceForm, retencion: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Generar 5% de Retención</span></div>
+                   </label>
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={manualInvoiceForm.prontoPagoTipo} onChange={e => setManualInvoiceForm({...manualInvoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option><option value="2.5">Aplicar 2,5%</option><option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={manualInvoiceForm.descuentoManual} onChange={e => setManualInvoiceForm({...manualInvoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
+                 </div>
+
+                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
+                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
+                    <div className="space-y-3 font-mono text-sm">
+                      <div className="flex justify-between items-center text-gray-300"><span>TOTAL BRUTO:</span><span className="font-bold text-white text-lg">{manualSubtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                      {manualPpAmount > 0 && <div className="flex justify-between items-center text-blue-400"><span>{manualPpRate}% PRONTO PAGO:</span><span>-{manualPpAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {manualDescManual > 0 && <div className="flex justify-between items-center text-purple-400"><span>DESCUENTO EXTRA:</span><span>-{manualDescManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {(manualPpAmount > 0 || manualDescManual > 0) && <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2"><span>BASE IMPONIBLE NETA:</span><span>{manualBaseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {manualInvoiceForm.retencion && <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2"><span>5% RETENCIÓN:</span><span>-{manualRetAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2"><span>IVA 21%:</span><span>{manualIvaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                      <div className="flex justify-between items-center pt-2 text-green-400"><span className="font-black text-lg">A COBRAR:</span><span className="font-black text-2xl">{manualTotalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                    </div>
+                 </div>
+              </div>
+              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
+                <p className="text-xs text-gray-500 italic">Esta factura se añadirá a tu base de datos global y módulos fiscales.</p>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setManualInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
+                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Guardar Factura Manual</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMAR CIERRE */}
+      {confirmCierre && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
+            <p className="text-sm text-gray-600 mb-4">Selecciona qué empresa deseas incluir en este cierre.</p>
+            
+            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 rounded-xl">
+              <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Empresa:</label>
+              <select className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium" value={cierreEmpresa} onChange={e => setCierreEmpresa(e.target.value)}>
+                <option value="Todas">Todas las Empresas (Cierre General)</option>
+                {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+              <div className="mt-3 flex justify-between items-center text-sm">
+                <span className="text-gray-500">Expedientes a cerrar:</span>
+                <span className="font-black text-red-600 text-lg">
+                  {obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa)).length}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => { setConfirmCierre(false); setCierreEmpresa('Todas'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
+              <button onClick={handleCerrarCiclo} className="flex-1 py-2.5 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700 transition-colors">Confirmar Cierre</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDICIÓN DE FACTURAS */}
+      {editingFactura && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-bold flex items-center gap-2"><Edit size={20}/> Editar Factura {editingFactura.numFactura}</h3>
+              <button onClick={() => setEditingFactura(null)}><X className="text-gray-400 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await updateDoc(doc(db, "facturas", editingFactura.id), {
+                  fecha: editingFactura.fecha, contrato: editingFactura.contrato || '', pedido: editingFactura.pedido || '',
+                  cliente: editingFactura.cliente, subtotal: editSubtotal, retencion: editRetAmount, prontoPago: editPpAmount,
+                  prontoPagoTipo: editPpRate, descuentoManual: editDescManual, iva: editIvaAmount, total: editTotalAmount
+                });
+                showToast("Factura actualizada con éxito", "success");
+                setEditingFactura(null);
+              } catch(err) {
+                showToast("Error al guardar cambios", "error");
+              }
+            }} className="p-6 overflow-y-auto flex flex-col gap-6">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Fecha Emisión *">
+                  <input type="date" required className="input-field" value={editingFactura.fecha} onChange={e => setEditingFactura({...editingFactura, fecha: e.target.value})} />
+                </InputGroup>
+                <InputGroup label="Cambiar Cliente Fiscal">
+                  <select className="input-field border-gray-300 font-bold" 
+                    value={config.empresasFacturacion?.findIndex(c => c.cif === editingFactura.cliente.cif) >= 0 ? config.empresasFacturacion?.findIndex(c => c.cif === editingFactura.cliente.cif) : -1}
+                    onChange={e => {
+                      if(e.target.value !== "-1") setEditingFactura({...editingFactura, cliente: config.empresasFacturacion[e.target.value]});
+                    }}>
+                    <option value={-1} disabled>-- Cliente Genérico --</option>
+                    {config.empresasFacturacion?.map((emp, i) => (
+                      <option key={i} value={i}>{emp.nombre}</option>
+                    ))}
+                  </select>
+                </InputGroup>
+              </div>
+
+              <div className="bg-gray-50 p-4 border border-gray-200 rounded-lg text-xs text-gray-600">
+                <p className="font-bold text-gray-900 mb-1">Cliente actual en factura:</p>
+                <p><strong>{editingFactura.cliente.nombre}</strong></p>
+                <p>CIF: {editingFactura.cliente.cif}</p>
+                <p className="whitespace-pre-line leading-tight mt-1">{editingFactura.cliente.direccion}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <InputGroup label="Nº Contrato"><input className="input-field" value={editingFactura.contrato || ''} onChange={e => setEditingFactura({...editingFactura, contrato: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                <InputGroup label="Nº Pedido"><input className="input-field" value={editingFactura.pedido || ''} onChange={e => setEditingFactura({...editingFactura, pedido: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                <div className="col-span-2">
+                  <InputGroup label="Base Imponible (Total Bruto €)">
+                    <input type="number" step="0.01" required className="input-field font-black text-gray-900 bg-white border-2 border-gray-300" value={editingFactura.subtotal || 0} onChange={e => setEditingFactura({...editingFactura, subtotal: e.target.value})} />
+                  </InputGroup>
+                  <p className="text-[10px] text-gray-500 mt-1 italic">Edita este importe si necesitas cuadrar la factura por conceptos extra.</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3 mt-2">
+                 <h4 className="font-bold text-gray-700 border-b pb-2 text-sm uppercase">Condiciones Comerciales</h4>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors md:col-span-2">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={editingFactura.retencionEnabled} onChange={e => setEditingFactura({...editingFactura, retencionEnabled: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
+                   </label>
+                   <InputGroup label="Descuento Pronto Pago">
+                     <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={editingFactura.prontoPagoTipo} onChange={e => setEditingFactura({...editingFactura, prontoPagoTipo: e.target.value})}>
+                       <option value="0">Ninguno (0%)</option><option value="2.5">Aplicar 2,5%</option><option value="5">Aplicar 5%</option>
+                     </select>
+                   </InputGroup>
+                   <InputGroup label="Descuento Manual (€)">
+                     <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={editingFactura.descuentoManual} onChange={e => setEditingFactura({...editingFactura, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                   </InputGroup>
+                 </div>
+              </div>
+              
+              <div className="bg-gray-100 p-4 rounded-lg flex justify-between items-center text-sm font-medium border border-gray-200">
+                <span className="text-gray-600">Base Neta: {editBaseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-gray-600">IVA: {editIvaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-green-700 font-bold text-lg">Total: {editTotalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-2">
+                <button type="button" onClick={() => setEditingFactura(null)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold shadow-lg shadow-blue-200 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all"><Save size={18}/> Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDICIÓN RETENCIÓN MANUAL */}
+      {editingRetencion && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-bold flex items-center gap-2"><PiggyBank size={20}/> Retención: {editingRetencion.numFactura}</h3>
+              <button onClick={() => setEditingRetencion(null)}><X className="text-gray-400 hover:text-white"/></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await updateDoc(doc(db, "facturas", editingRetencion.id), { 
+                  retencionSolicitada: editingRetencion.retencionSolicitada,
+                  fechaSolicitudRetencion: editingRetencion.retencionSolicitada ? new Date(editingRetencion.fechaSolicitudRetencion).toISOString() : null
+                });
+                showToast("Estado de retención actualizado", "success");
+                setEditingRetencion(null);
+              } catch(err) {
+                showToast("Error al guardar", "error");
+              }
+            }} className="p-6 flex flex-col gap-5">
+              
+              <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" className="w-5 h-5 text-blue-600 rounded" 
+                    checked={editingRetencion.retencionSolicitada} 
+                    onChange={e => setEditingRetencion({...editingRetencion, retencionSolicitada: e.target.checked})} 
+                  />
+                  <span className="font-bold text-blue-900">Marcar como Cobrada / Reclamada</span>
+                </label>
+                <p className="text-xs text-blue-700 mt-1 ml-8">Permite adelantar el cobro manualmente y sacarla de "Pendientes".</p>
+              </div>
+
+              {editingRetencion.retencionSolicitada && (
+                <div className="animate-in fade-in slide-in-from-top-2">
+                  <InputGroup label="Fecha exacta de Cobro / Reclamación">
+                    <input type="date" required className="input-field border-2 border-blue-200" 
+                      value={editingRetencion.fechaSolicitudRetencion} 
+                      onChange={e => setEditingRetencion({...editingRetencion, fechaSolicitudRetencion: e.target.value})} 
+                    />
+                  </InputGroup>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => setEditingRetencion(null)} className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-6 py-2 rounded-lg text-white font-bold bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2"><Save size={16}/> Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL REPORTE DE FACTURAS EMITIDAS */}
-      {showFacturasReportModal && (() => {
-        const clientesDisponibles = [...new Set(facturas.map(f => f.cliente.nombre))];
-        
-        const facturasFiltradas = facturas.filter(f => {
-          if (facturasReportClientFilter === 'Todos') return true;
-          return f.cliente.nombre === facturasReportClientFilter;
-        });
-        
-        const todasSeleccionadas = facturasFiltradas.length > 0 && facturasFiltradas.every(f => selectedFacturasReport.includes(f.id));
-
-        const handleToggleFactura = (id) => {
-          if (selectedFacturasReport.includes(id)) setSelectedFacturasReport(selectedFacturasReport.filter(x => x !== id));
-          else setSelectedFacturasReport([...selectedFacturasReport, id]);
-        };
-
-        return (
+      {showFacturasReportModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
             <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1618,12 +1932,12 @@ export default function App() {
                     <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 text-center w-12">
-                          <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={todasSeleccionadas} onChange={(e) => {
+                          <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={todasFacturasSeleccionadas} onChange={(e) => {
                             if (e.target.checked) {
-                              const ids = facturasFiltradas.map(f => f.id);
+                              const ids = facturasFiltradasReport.map(f => f.id);
                               setSelectedFacturasReport([...new Set([...selectedFacturasReport, ...ids])]);
                             } else {
-                              const idsToRem = facturasFiltradas.map(f => f.id);
+                              const idsToRem = facturasFiltradasReport.map(f => f.id);
                               setSelectedFacturasReport(selectedFacturasReport.filter(id => !idsToRem.includes(id)));
                             }
                           }}/>
@@ -1635,8 +1949,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {facturasFiltradas.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-400 italic">No hay facturas con este filtro.</td></tr>}
-                      {facturasFiltradas.map(f => (
+                      {facturasFiltradasReport.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-400 italic">No hay facturas con este filtro.</td></tr>}
+                      {facturasFiltradasReport.map(f => (
                         <tr key={f.id} className={`cursor-pointer transition-colors ${selectedFacturasReport.includes(f.id) ? 'bg-red-50/50' : 'hover:bg-gray-50'}`} onClick={() => handleToggleFactura(f.id)}>
                           <td className="px-4 py-3 text-center">
                             <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={selectedFacturasReport.includes(f.id)} readOnly />
@@ -1668,6 +1982,7 @@ export default function App() {
                     setTimeout(() => {
                         window.print();
                         setFacturasToPrint(null);
+                        setSelectedFacturasReport([]);
                     }, 500);
                   }} className={`px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-md transition-all ${selectedFacturasReport.length > 0 ? 'bg-red-600 hover:bg-red-700 text-white active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
                     <Printer size={18}/> Generar PDF / Imprimir
@@ -1676,28 +1991,10 @@ export default function App() {
               </div>
             </div>
           </div>
-        );
-      })()}
+      )}
 
       {/* MODAL REPORTE MULTIPLE DE CICLOS */}
-      {showReportModal && (() => {
-        const mesesDisponibles = [...new Set(ciclos.map(c => {
-          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})
-        }))];
-        
-        const ciclosFiltrados = ciclos.filter(c => {
-          if (reportMonthFilter === 'Todos') return true;
-          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
-        });
-        
-        const todosSeleccionados = ciclosFiltrados.length > 0 && ciclosFiltrados.every(c => selectedCiclosReport.includes(c.id));
-
-        const handleToggleCiclo = (id) => {
-          if (selectedCiclosReport.includes(id)) setSelectedCiclosReport(selectedCiclosReport.filter(x => x !== id));
-          else setSelectedCiclosReport([...selectedCiclosReport, id]);
-        };
-
-        return (
+      {showReportModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
             <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1721,12 +2018,12 @@ export default function App() {
                     <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 text-center w-12">
-                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={todosSeleccionados} onChange={(e) => {
+                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={todosCiclosSeleccionados} onChange={(e) => {
                             if (e.target.checked) {
-                              const ids = ciclosFiltrados.map(c => c.id);
+                              const ids = ciclosFiltradosReport.map(c => c.id);
                               setSelectedCiclosReport([...new Set([...selectedCiclosReport, ...ids])]);
                             } else {
-                              const idsToRem = ciclosFiltrados.map(c => c.id);
+                              const idsToRem = ciclosFiltradosReport.map(c => c.id);
                               setSelectedCiclosReport(selectedCiclosReport.filter(id => !idsToRem.includes(id)));
                             }
                           }}/>
@@ -1737,8 +2034,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {ciclosFiltrados.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-400 italic">No hay ciclos en este mes.</td></tr>}
-                      {ciclosFiltrados.map(c => (
+                      {ciclosFiltradosReport.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-400 italic">No hay ciclos en este mes.</td></tr>}
+                      {ciclosFiltradosReport.map(c => (
                         <tr key={c.id} className={`cursor-pointer transition-colors ${selectedCiclosReport.includes(c.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`} onClick={() => handleToggleCiclo(c.id)}>
                           <td className="px-4 py-3 text-center">
                             <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={selectedCiclosReport.includes(c.id)} readOnly />
@@ -1768,6 +2065,7 @@ export default function App() {
                     setTimeout(() => {
                         window.print();
                         setMultiCicloToPrint(null);
+                        setSelectedCiclosReport([]);
                     }, 500);
                   }} className={`px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-md transition-all ${selectedCiclosReport.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
                     <Printer size={18}/> Generar PDF / Imprimir
@@ -1776,8 +2074,7 @@ export default function App() {
               </div>
             </div>
           </div>
-        );
-      })()}
+      )}
     </div>
   );
 }
