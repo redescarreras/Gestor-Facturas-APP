@@ -91,7 +91,7 @@ export default function App() {
     numPedido: '',
     subtotal: '',
     retencion: true,
-    prontoPagoTipo: '0', // 0, 2.5, 5
+    prontoPagoTipo: '0', 
     descuentoManual: '',
     formaPago: 'CONFIRMING A 120 DÍAS'
   });
@@ -99,6 +99,12 @@ export default function App() {
   // ESTADO MÓDULO RETENCIONES
   const [retencionesFilter, setRetencionesFilter] = useState('Todas');
   const [editingRetencion, setEditingRetencion] = useState(null);
+
+  // ESTADOS REPORTE MULTIPLE CICLOS
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportMonthFilter, setReportMonthFilter] = useState('Todos');
+  const [selectedCiclosReport, setSelectedCiclosReport] = useState([]);
+  const [multiCicloToPrint, setMultiCicloToPrint] = useState(null);
 
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientData, setNewClientData] = useState({ nombre: '', cif: '', direccion: '' });
@@ -140,7 +146,6 @@ export default function App() {
   };
   const [formData, setFormData] = useState(initialObraState);
 
-  // Formulario Factura de Ciclo
   const [invoiceForm, setInvoiceForm] = useState({
     clienteIdx: 0,
     numFactura: '',
@@ -148,7 +153,7 @@ export default function App() {
     numContrato: '',
     numPedido: '',
     retencion: false,
-    prontoPagoTipo: '0', // 0, 2.5, 5
+    prontoPagoTipo: '0', 
     descuentoManual: '',
     formaPago: 'CONFIRMING A 120 DÍAS',
     usarImporteManual: false,
@@ -749,20 +754,94 @@ export default function App() {
 
       <style>{`
         @media print {
-          @page { margin: ${invoiceToPrint ? '0' : 'auto'}; } 
-          .hide-on-invoice-print { display: ${invoiceToPrint ? 'none !important' : 'block'}; }
+          @page { margin: ${(invoiceToPrint || multiCicloToPrint) ? '0' : 'auto'}; } 
+          .hide-on-invoice-print { display: ${(invoiceToPrint || multiCicloToPrint) ? 'none !important' : 'block'}; }
           aside, header, .no-print, .fab-button, .modal-overlay, button, .input-filter { display: none !important; }
-          main { margin: 0 !important; padding: ${invoiceToPrint ? '0' : '20px'} !important; overflow: visible !important; height: auto !important; width: 100% !important; background: white !important; }
+          main { margin: 0 !important; padding: ${(invoiceToPrint || multiCicloToPrint) ? '0' : '20px'} !important; overflow: visible !important; height: auto !important; width: 100% !important; background: white !important; }
           body { background: white !important; font-size: 11px; color: black; }
-          .print-header { display: ${invoiceToPrint ? 'none !important' : 'flex !important'}; margin-bottom: 30px; border-bottom: 2px solid #cc0000; padding-bottom: 15px; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
+          .print-header { display: ${(invoiceToPrint || multiCicloToPrint) ? 'none !important' : 'flex !important'}; margin-bottom: 30px; border-bottom: 2px solid #cc0000; padding-bottom: 15px; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
           .card-resumen { border: 1px solid #ddd !important; box-shadow: none !important; margin-bottom: 15px; page-break-inside: avoid; }
           .break-page { page-break-before: always; }
-          .invoice-wrapper { display: ${invoiceToPrint ? 'block !important' : 'none'}; padding: 15mm; width: 100%; box-sizing: border-box; }
+          .invoice-wrapper { display: ${(invoiceToPrint || multiCicloToPrint) ? 'block !important' : 'none'}; padding: 15mm; width: 100%; box-sizing: border-box; }
           .invoice-table th, .invoice-table td { padding: 8px; border: 1px solid #ddd; text-align: left; }
           .invoice-table th { background-color: #f8f9fa !important; font-weight: bold; }
         }
         .print-header, .invoice-wrapper { display: none; }
       `}</style>
+
+      {/* PLANTILLA DE REPORTE DE CICLOS MÚLTIPLES PARA IMPRESIÓN */}
+      {multiCicloToPrint && (() => {
+        let totalExpedientes = 0; let totalBase = 0; let totalRetenciones = 0; let totalFinal = 0;
+        multiCicloToPrint.forEach(c => {
+          (c.obras || []).forEach(o => {
+            totalExpedientes++;
+            const b = parseFloat(o.importe) || 0;
+            const p = o.tieneRetencion ? b * 0.05 : 0;
+            const u = (parseFloat(o.uuii) || 0) * 1.5;
+            totalBase += b; totalRetenciones += p; totalFinal += (b + p + u);
+          });
+        });
+
+        return (
+          <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
+            <div className="flex justify-between border-b-2 border-gray-800 pb-4 mb-6 items-end">
+              <div>
+                <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none mb-1">REPORTE DE CICLOS</h1>
+                <p className="font-bold text-sm text-gray-500 uppercase tracking-widest">REDES CARRERAS S.L.</p>
+              </div>
+              <div className="text-right">
+                <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
+                <p className="text-sm text-gray-500">{multiCicloToPrint.length} Ciclos Exportados</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Expedientes</p><p className="font-black text-lg">{totalExpedientes}</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Imponible</p><p className="font-bold text-lg text-gray-800">{totalBase.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Retenciones (5%)</p><p className="font-bold text-lg text-blue-700">{totalRetenciones.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Valor Total (Con Plus)</p><p className="font-black text-xl text-green-700">{totalFinal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            </div>
+
+            {multiCicloToPrint.map(ciclo => (
+              <div key={ciclo.id} className="mb-8 break-inside-avoid">
+                <div className="flex justify-between items-end border-b-2 border-gray-300 pb-2 mb-3">
+                  <h3 className="font-bold text-lg text-gray-800 uppercase">{ciclo.nombre}</h3>
+                  <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">{new Date(ciclo.fecha).toLocaleDateString('es-ES')}</span>
+                </div>
+                <table className="w-full invoice-table text-xs border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="w-20">Fecha</th>
+                      <th className="w-24">ID Carreras</th>
+                      <th>Central / Obra</th>
+                      <th className="w-24 text-right">Base</th>
+                      <th className="w-24 text-right">Total 5% Incl.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(ciclo.obras || []).length === 0 && <tr><td colSpan="5" className="text-center italic text-gray-500 py-2">Ciclo vacío</td></tr>}
+                    {(ciclo.obras || []).map(o => {
+                      const base = parseFloat(o.importe) || 0;
+                      const plus = o.tieneRetencion ? base * 0.05 : 0;
+                      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+                      const final = base + plus + uuii;
+                      return (
+                        <tr key={o.id} className="border-b border-gray-100">
+                          <td className="text-gray-600">{new Date(o.fecha).toLocaleDateString()}</td>
+                          <td className="font-mono font-bold">{o.idCarreras}</td>
+                          <td><span className="font-bold">{o.central}</span> - {o.nombre}</td>
+                          <td className="text-right">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                          <td className="text-right font-bold text-gray-900">{final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* PLANTILLA DE FACTURA PARA IMPRESIÓN */}
       {invoiceToPrint && (
@@ -872,6 +951,7 @@ export default function App() {
         </div>
       )}
 
+      {}
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden hide-on-invoice-print">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
@@ -919,6 +999,7 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 print:p-0">
           
+          {}
           {activeTab === 'panel' && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end no-print">
@@ -1200,9 +1281,14 @@ export default function App() {
                   <h3 className="text-xl font-bold text-gray-800">Historial de Ciclos</h3>
                   <p className="text-sm text-gray-500">Consulta los cierres pasados o genera uno nuevo.</p>
                 </div>
-                <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
-                  <Lock size={18} /> Cerrar Ciclo Actual
-                </button>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowReportModal(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95">
+                    <Download size={18} /> Exportar Reporte
+                  </button>
+                  <button onClick={() => setConfirmCierre(true)} className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95">
+                    <Lock size={18} /> Cerrar Ciclo Actual
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {ciclos.length === 0 && <p className="col-span-full text-center text-gray-400 py-12 bg-white rounded-xl border border-dashed border-gray-300">No hay ciclos cerrados todavía.</p>}
@@ -1378,6 +1464,7 @@ export default function App() {
         </div>
       </main>
 
+      {}
       {/* MODAL OBRA */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
@@ -1641,7 +1728,7 @@ export default function App() {
             </form>
           </div>
         </div>
-      );
+        );
       })()}
 
       {/* MODAL AÑADIR FACTURA MANUAL */}
@@ -1794,42 +1881,8 @@ export default function App() {
             </form>
           </div>
         </div>
-      );
+        );
       })()}
-
-      {/* CONFIRMAR CIERRE */}
-      {confirmCierre && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
-          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
-            <p className="text-sm text-gray-600 mb-4">Selecciona qué empresa deseas incluir en este cierre. Las obras pendientes pasarán a estado "Facturadas".</p>
-            
-            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 rounded-xl">
-              <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Empresa:</label>
-              <select 
-                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium"
-                value={cierreEmpresa} 
-                onChange={e => setCierreEmpresa(e.target.value)}
-              >
-                <option value="Todas">Todas las Empresas (Cierre General)</option>
-                {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
-              </select>
-              
-              <div className="mt-3 flex justify-between items-center text-sm">
-                <span className="text-gray-500">Expedientes a cerrar:</span>
-                <span className="font-black text-red-600 text-lg">
-                  {obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa)).length}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button onClick={() => { setConfirmCierre(false); setCierreEmpresa('Todas'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
-              <button onClick={handleCerrarCiclo} className="flex-1 py-2.5 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700 transition-colors">Confirmar Cierre</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* MODAL EDICIÓN DE FACTURAS */}
       {editingFactura && (() => {
@@ -1949,7 +2002,7 @@ export default function App() {
             </form>
           </div>
         </div>
-      );
+        );
       })()}
 
       {/* MODAL EDICIÓN RETENCIÓN MANUAL */}
@@ -2004,6 +2057,106 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODAL REPORTE MULTIPLE DE CICLOS */}
+      {showReportModal && (() => {
+        const mesesDisponibles = [...new Set(ciclos.map(c => {
+          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})
+        }))];
+        
+        const ciclosFiltrados = ciclos.filter(c => {
+          if (reportMonthFilter === 'Todos') return true;
+          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
+        });
+        
+        const todosSeleccionados = ciclosFiltrados.length > 0 && ciclosFiltrados.every(c => selectedCiclosReport.includes(c.id));
+
+        const handleToggleCiclo = (id) => {
+          if (selectedCiclosReport.includes(id)) setSelectedCiclosReport(selectedCiclosReport.filter(x => x !== id));
+          else setSelectedCiclosReport([...selectedCiclosReport, id]);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+            <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+                <h3 className="text-lg font-bold flex items-center gap-2"><Download size={20}/> Exportar Reporte de Ciclos</h3>
+                <button onClick={() => setShowReportModal(false)}><X className="text-gray-400 hover:text-white"/></button>
+              </div>
+              
+              <div className="p-6 flex flex-col gap-4 overflow-hidden h-full">
+                <div className="flex gap-4 items-end bg-gray-50 p-4 rounded-xl border border-gray-200 shrink-0">
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Filtrar por Mes</label>
+                    <select className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium capitalize" value={reportMonthFilter} onChange={(e) => setReportMonthFilter(e.target.value)}>
+                      <option value="Todos">Todos los meses históricos</option>
+                      {mesesDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-xl relative">
+                  <table className="w-full text-sm text-left relative">
+                    <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
+                      <tr>
+                        <th className="px-4 py-3 text-center w-12">
+                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={todosSeleccionados} onChange={(e) => {
+                            if (e.target.checked) {
+                              const ids = ciclosFiltrados.map(c => c.id);
+                              setSelectedCiclosReport([...new Set([...selectedCiclosReport, ...ids])]);
+                            } else {
+                              const idsToRem = ciclosFiltrados.map(c => c.id);
+                              setSelectedCiclosReport(selectedCiclosReport.filter(id => !idsToRem.includes(id)));
+                            }
+                          }}/>
+                        </th>
+                        <th className="px-4 py-3">Nombre del Ciclo</th>
+                        <th className="px-4 py-3">Fecha de Cierre</th>
+                        <th className="px-4 py-3 text-right">Volumen</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {ciclosFiltrados.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-400 italic">No hay ciclos en este mes.</td></tr>}
+                      {ciclosFiltrados.map(c => (
+                        <tr key={c.id} className={`cursor-pointer transition-colors ${selectedCiclosReport.includes(c.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`} onClick={() => handleToggleCiclo(c.id)}>
+                          <td className="px-4 py-3 text-center">
+                            <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={selectedCiclosReport.includes(c.id)} readOnly />
+                          </td>
+                          <td className="px-4 py-3 font-bold text-gray-800">{c.nombre}</td>
+                          <td className="px-4 py-3 text-gray-500">{new Date(c.fecha).toLocaleDateString()}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">{c.totalObras} expedientes</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
+                <span className="text-sm text-gray-600 font-bold bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+                  <span className="text-blue-600">{selectedCiclosReport.length}</span> ciclos seleccionados
+                </span>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowReportModal(false)} className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-white transition-colors">Cancelar</button>
+                  <button disabled={selectedCiclosReport.length === 0} onClick={() => {
+                    const ciclosData = ciclos.filter(c => selectedCiclosReport.includes(c.id));
+                    setMultiCicloToPrint(ciclosData);
+                    setShowReportModal(false);
+                    setTimeout(() => {
+                        window.print();
+                        setMultiCicloToPrint(null);
+                    }, 500);
+                  }} className={`px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-md transition-all ${selectedCiclosReport.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                    <Printer size={18}/> Generar PDF / Imprimir
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
