@@ -242,26 +242,40 @@ export default function App() {
     e.preventDefault();
     if (!user) return showToast("Esperando conexión...", "info");
 
-    const obraData = {
-      ...formData,
-      importe: parseFloat(formData.importe) || 0,
-      mes: new Date(formData.fecha).toLocaleString('es-ES', { month: 'long', year: 'numeric' }),
-      updatedAt: new Date(),
-      updatedBy: user.uid
-    };
-
-    setModalOpen(false);
-    setFormData(initialObraState);
-    const esEdicion = !!editingObra;
-    setEditingObra(null);
-    showToast("Guardando...", "info");
-
     try {
-      if (esEdicion) await updateDoc(doc(db, "obras", editingObra.id), obraData);
-      else await addDoc(collection(db, "obras"), { ...obraData, createdAt: new Date() });
-      showToast(esEdicion ? "Actualizado" : "Guardado", "success");
+      const obraData = {
+        ...formData,
+        importe: parseFloat(formData.importe) || 0,
+        uuii: parseFloat(formData.uuii) || 0,
+        mes: formData.fecha ? new Date(formData.fecha).toLocaleString('es-ES', { month: 'long', year: 'numeric' }) : 'Mes Desconocido',
+        updatedAt: new Date().toISOString(),
+        updatedBy: user.uid
+      };
+
+      // LIMPIEZA VITAL DE DATOS: Firebase colapsa si intentamos guardar valores "undefined"
+      Object.keys(obraData).forEach(key => {
+        if (obraData[key] === undefined) delete obraData[key];
+      });
+      if (obraData.id) delete obraData.id;
+
+      const esEdicion = !!editingObra;
+      const idObraActual = editingObra ? editingObra.id : null;
+      
+      setModalOpen(false);
+      setFormData(initialObraState);
+      setEditingObra(null);
+      showToast("Guardando...", "info");
+
+      if (esEdicion && idObraActual) {
+        await updateDoc(doc(db, "obras", idObraActual), obraData);
+        showToast("Actualizado correctamente", "success");
+      } else {
+        await addDoc(collection(db, "obras"), { ...obraData, createdAt: new Date().toISOString() });
+        showToast("Guardado correctamente", "success");
+      }
     } catch (error) {
-      showToast("Error al guardar", "error");
+      console.error("Error crítico al guardar:", error);
+      showToast("Error al guardar en base de datos", "error");
     }
   };
 
@@ -628,19 +642,35 @@ export default function App() {
     }
   };
 
+  // --- BOTÓN EDITAR COMPLETAMENTE REPARADO ---
   const handleEdit = (obra) => {
-    setEditingObra(obra);
-    
-    // PREVENCIÓN: Evitar que campos vacíos antiguos rompan el formulario
-    const safeObra = { ...initialObraState };
-    Object.keys(obra).forEach(key => {
-      if (obra[key] !== undefined && obra[key] !== null) safeObra[key] = obra[key];
-    });
-    
-    if (safeObra.fecha) safeObra.fecha = safeObra.fecha.split('T')[0];
+    try {
+      setEditingObra(obra);
+      
+      const safeObra = { ...initialObraState };
+      Object.keys(obra).forEach(key => {
+        if (obra[key] !== undefined && obra[key] !== null) safeObra[key] = obra[key];
+      });
+      
+      // Control robusto de fechas antiguas para evitar que colapse el Modal
+      if (safeObra.fecha) {
+          if (typeof safeObra.fecha === 'string') {
+              safeObra.fecha = safeObra.fecha.split('T')[0];
+          } else if (typeof safeObra.fecha.toDate === 'function') {
+              safeObra.fecha = safeObra.fecha.toDate().toISOString().split('T')[0];
+          } else if (safeObra.fecha instanceof Date) {
+              safeObra.fecha = safeObra.fecha.toISOString().split('T')[0];
+          }
+      } else {
+          safeObra.fecha = new Date().toISOString().split('T')[0];
+      }
 
-    setFormData(safeObra);
-    setModalOpen(true);
+      setFormData(safeObra);
+      setModalOpen(true);
+    } catch (error) {
+      console.error("Error al abrir edición:", error);
+      showToast("Error al cargar datos del expediente.", "error");
+    }
   };
 
   const updateConfigList = async (type, action, value) => {
