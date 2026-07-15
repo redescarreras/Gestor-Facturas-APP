@@ -300,6 +300,17 @@ export default function App() {
   
   const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
 
+  // --- FUNCIONES PARA SELECCIONAR EN REPORTES ---
+  const handleToggleFactura = (id) => {
+    if (selectedFacturasReport.includes(id)) setSelectedFacturasReport(selectedFacturasReport.filter(x => x !== id));
+    else setSelectedFacturasReport([...selectedFacturasReport, id]);
+  };
+
+  const handleToggleCiclo = (id) => {
+    if (selectedCiclosReport.includes(id)) setSelectedCiclosReport(selectedCiclosReport.filter(x => x !== id));
+    else setSelectedCiclosReport([...selectedCiclosReport, id]);
+  };
+
   // Totales de Impresión
   const facturasPrintTotals = useMemo(() => {
     if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
