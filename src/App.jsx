@@ -1905,6 +1905,289 @@ export default function App() {
         );
       })()}
 
+      {/* MODAL CREACIÓN FACTURA OFICIAL DESDE CICLO */}
+      {invoiceModalOpen && (() => {
+        const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
+        const ppAmount = effectiveSubtotalDisplay * (ppRate / 100);
+        const descManual = parseFloat(invoiceForm.descuentoManual) || 0;
+        const baseNet = effectiveSubtotalDisplay - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
+            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2"><Receipt size={22}/> Emisión de Factura</h3>
+                <p className="text-xs text-red-200">Se van a facturar {selectedForInvoice.length} expedientes.</p>
+              </div>
+              <button onClick={() => setInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={handleCreateFactura} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
+                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
+                    <select className="input-field border-gray-300 font-bold" value={invoiceForm.clienteIdx} onChange={e => setInvoiceForm({...invoiceForm, clienteIdx: e.target.value})}>
+                      {config.empresasFacturacion?.map((emp, i) => (
+                        <option key={i} value={i}>{emp.nombre}</option>
+                      ))}
+                    </select>
+                  </InputGroup>
+                  {config.empresasFacturacion && config.empresasFacturacion[invoiceForm.clienteIdx] && (
+                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
+                      <p><strong>CIF:</strong> {config.empresasFacturacion[invoiceForm.clienteIdx].cif}</p>
+                      <p className="whitespace-pre-line">{config.empresasFacturacion[invoiceForm.clienteIdx].direccion}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={invoiceForm.numFactura} onChange={e => setInvoiceForm({...invoiceForm, numFactura: e.target.value})} placeholder="Ej. 38-06-26" /></InputGroup>
+                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={invoiceForm.fecha} onChange={e => setInvoiceForm({...invoiceForm, fecha: e.target.value})} /></InputGroup>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={invoiceForm.numContrato} onChange={e => setInvoiceForm({...invoiceForm, numContrato: e.target.value})} placeholder="Ej. 509/86200" /></InputGroup>
+                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={invoiceForm.numPedido} onChange={e => setInvoiceForm({...invoiceForm, numPedido: e.target.value})} placeholder="Ej. PED-2026" /></InputGroup>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
+                   
+                   <InputGroup label="Forma de Pago Estipulada">
+                      <select className="input-field bg-gray-100 font-medium" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
+                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
+                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
+                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
+                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
+                      </select>
+                   </InputGroup>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={invoiceForm.retencion} onChange={e => setInvoiceForm({...invoiceForm, retencion: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
+                   </label>
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={invoiceForm.prontoPagoTipo} onChange={e => setInvoiceForm({...invoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option>
+                         <option value="2.5">Aplicar 2,5%</option>
+                         <option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={invoiceForm.descuentoManual} onChange={e => setInvoiceForm({...invoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
+
+                   <label className="flex items-center gap-3 p-3 mt-4 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                     <input type="checkbox" className="w-5 h-5 text-gray-600 rounded" checked={invoiceForm.usarImporteManual} onChange={e => {
+                        const isChecked = e.target.checked;
+                        setInvoiceForm({...invoiceForm, usarImporteManual: isChecked, importeManual: isChecked ? subtotalFactura : ''})
+                     }} />
+                     <div>
+                       <span className="font-bold text-gray-900 block text-sm">Modificar Importe Bruto Manualmente</span>
+                       <span className="text-[10px] text-gray-500 leading-none">Permite ajustar el importe base si sumas conceptos extra.</span>
+                     </div>
+                   </label>
+
+                   {invoiceForm.usarImporteManual && (
+                     <div className="pt-2 animate-in fade-in slide-in-from-top-2">
+                       <InputGroup label="Total Bruto Personalizado (€)">
+                         <input type="number" step="0.01" required={invoiceForm.usarImporteManual} className="input-field border-gray-300 font-bold text-lg text-gray-900" value={invoiceForm.importeManual} onChange={e => setInvoiceForm({...invoiceForm, importeManual: e.target.value})} />
+                       </InputGroup>
+                     </div>
+                   )}
+                 </div>
+
+                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
+                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
+                    <div className="space-y-3 font-mono text-sm">
+                      <div className="flex justify-between items-center text-gray-300">
+                        <span>TOTAL BRUTO:</span>
+                        <span className="font-bold text-white text-lg">{effectiveSubtotalDisplay.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      </div>
+                      
+                      {ppAmount > 0 && (
+                        <div className="flex justify-between items-center text-blue-400">
+                          <span>{ppRate}% PRONTO PAGO:</span>
+                          <span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+                      
+                      {descManual > 0 && (
+                        <div className="flex justify-between items-center text-purple-400">
+                          <span>DESCUENTO EXTRA:</span>
+                          <span>-{descManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {(ppAmount > 0 || descManual > 0) && (
+                        <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2">
+                          <span>BASE IMPONIBLE NETA:</span>
+                          <span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+
+                      {invoiceForm.retencion && (
+                        <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2">
+                          <span>5% RETENCIÓN:</span>
+                          <span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2">
+                        <span>IVA 21%:</span>
+                        <span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center pt-2 text-green-400">
+                        <span className="font-black text-lg">A COBRAR:</span>
+                        <span className="font-black text-2xl">
+                          {totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                        </span>
+                      </div>
+                    </div>
+                 </div>
+              </div>
+              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
+                <p className="text-xs text-gray-500 italic">* Revisa que el Nº Factura no exista previamente. Esta acción es irreversible.</p>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
+                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Emitir Factura Oficial</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* MODAL AÑADIR FACTURA MANUAL */}
+      {manualInvoiceModalOpen && (() => {
+        const subtotal = parseFloat(manualInvoiceForm.subtotal) || 0;
+        const ppRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
+        const ppAmount = subtotal * (ppRate / 100);
+        const descManual = parseFloat(manualInvoiceForm.descuentoManual) || 0;
+        const baseNet = subtotal - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = manualInvoiceForm.retencion ? subtotal * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
+            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2"><Plus size={22}/> Añadir Factura Manual</h3>
+                <p className="text-xs text-red-200">Rellena huecos de facturación. Si marcas retención, aparecerá en tu listado.</p>
+              </div>
+              <button onClick={() => setManualInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
+            </div>
+            
+            <form onSubmit={handleCreateManualInvoice} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
+                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
+                    <select className="input-field border-gray-300 font-bold" value={manualInvoiceForm.clienteIdx} onChange={e => setManualInvoiceForm({...manualInvoiceForm, clienteIdx: e.target.value})}>
+                      {config.empresasFacturacion?.map((emp, i) => (
+                        <option key={i} value={i}>{emp.nombre}</option>
+                      ))}
+                    </select>
+                  </InputGroup>
+                  {config.empresasFacturacion && config.empresasFacturacion[manualInvoiceForm.clienteIdx] && (
+                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
+                      <p><strong>CIF:</strong> {config.empresasFacturacion[manualInvoiceForm.clienteIdx].cif}</p>
+                      <p className="whitespace-pre-line">{config.empresasFacturacion[manualInvoiceForm.clienteIdx].direccion}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={manualInvoiceForm.numFactura} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numFactura: e.target.value})} placeholder="Ej. 02-01-26" /></InputGroup>
+                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={manualInvoiceForm.fecha} onChange={e => setManualInvoiceForm({...manualInvoiceForm, fecha: e.target.value})} /></InputGroup>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={manualInvoiceForm.numContrato} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numContrato: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={manualInvoiceForm.numPedido} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numPedido: e.target.value})} placeholder="Opcional..." /></InputGroup>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Importes y Condiciones</h4>
+                   
+                   <InputGroup label="Importe Bruto (€) *">
+                     <input type="number" step="0.01" required className="input-field border-gray-300 font-bold text-lg text-gray-900" value={manualInvoiceForm.subtotal} onChange={e => setManualInvoiceForm({...manualInvoiceForm, subtotal: e.target.value})} placeholder="0.00" />
+                   </InputGroup>
+
+                   <InputGroup label="Forma de Pago Estipulada">
+                      <select className="input-field bg-gray-100 font-medium" value={manualInvoiceForm.formaPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, formaPago: e.target.value})}>
+                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
+                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
+                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
+                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
+                      </select>
+                   </InputGroup>
+                   
+                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors mt-2">
+                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={manualInvoiceForm.retencion} onChange={e => setManualInvoiceForm({...manualInvoiceForm, retencion: e.target.checked})} />
+                     <div><span className="font-bold text-red-900 block text-sm">Generar 5% de Retención (Aparecerá en el Control)</span></div>
+                   </label>
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                     <InputGroup label="Descuento Pronto Pago">
+                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={manualInvoiceForm.prontoPagoTipo} onChange={e => setManualInvoiceForm({...manualInvoiceForm, prontoPagoTipo: e.target.value})}>
+                         <option value="0">Ninguno (0%)</option>
+                         <option value="2.5">Aplicar 2,5%</option>
+                         <option value="5">Aplicar 5%</option>
+                       </select>
+                     </InputGroup>
+                     
+                     <InputGroup label="Descuento Manual (€)">
+                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={manualInvoiceForm.descuentoManual} onChange={e => setManualInvoiceForm({...manualInvoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
+                     </InputGroup>
+                   </div>
+                 </div>
+
+                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
+                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
+                    <div className="space-y-3 font-mono text-sm">
+                      <div className="flex justify-between items-center text-gray-300"><span>TOTAL BRUTO:</span><span className="font-bold text-white text-lg">{subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                      {ppAmount > 0 && <div className="flex justify-between items-center text-blue-400"><span>{ppRate}% PRONTO PAGO:</span><span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {descManual > 0 && <div className="flex justify-between items-center text-purple-400"><span>DESCUENTO EXTRA:</span><span>-{descManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {(ppAmount > 0 || descManual > 0) && <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2"><span>BASE IMPONIBLE NETA:</span><span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      {manualInvoiceForm.retencion && <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2"><span>5% RETENCIÓN:</span><span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
+                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2"><span>IVA 21%:</span><span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                      <div className="flex justify-between items-center pt-2 text-green-400"><span className="font-black text-lg">A COBRAR:</span><span className="font-black text-2xl">{totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+                    </div>
+                 </div>
+              </div>
+              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
+                <p className="text-xs text-gray-500 italic">Esta factura se añadirá a tu base de datos global y módulos fiscales.</p>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setManualInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
+                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Guardar Factura Manual</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* CONFIRMAR CIERRE */}
       {confirmCierre && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
