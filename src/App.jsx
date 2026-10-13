@@ -68,12 +68,16 @@ export default function App() {
   
   const [navState, setNavState] = useState({ empresa: null, encargado: null });
 
+  // ESTADOS MÓDULO OBRAS (Panel Principal)
   const [modalOpen, setModalOpen] = useState(false);
   const [editingObra, setEditingObra] = useState(null);
+  
+  // ESTADOS MÓDULO CICLOS
   const [viewCiclo, setViewCiclo] = useState(null);
   const [confirmCierre, setConfirmCierre] = useState(false);
   const [cierreEmpresa, setCierreEmpresa] = useState('Todas');
-  const [cierreEncargado, setCierreEncargado] = useState('Todos');
+  const [cierreEncargado, setCierreEncargado] = useState('Todos'); // Mantenemos el cierre por encargado
+
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   // ESTADOS MÓDULO FACTURAS
@@ -243,6 +247,40 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
+  // --- CÁLCULOS SEGUROS ---
+  const subtotalFactura = useMemo(() => {
+    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
+    return selectedForInvoice.reduce((sum, id) => {
+      const o = viewCiclo.obras.find(x => x.id === id);
+      if(!o) return sum;
+      const base = parseFloat(o.importe) || 0;
+      const plus = o.tieneRetencion ? base * 0.05 : 0;
+      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+      return sum + base + plus + uuii;
+    }, 0);
+  }, [selectedForInvoice, viewCiclo]);
+
+  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
+
+  // Cálculos para Reportes Múltiples de Facturas
+  const clientesDisponibles = useMemo(() => [...new Set(facturas.map(f => f.cliente?.nombre).filter(Boolean))], [facturas]);
+  const facturasFiltradasReport = useMemo(() => facturas.filter(f => {
+    if (facturasReportClientFilter === 'Todos') return true;
+    return f.cliente?.nombre === facturasReportClientFilter;
+  }), [facturas, facturasReportClientFilter]);
+  
+  const todasFacturasSeleccionadas = facturasFiltradasReport.length > 0 && facturasFiltradasReport.every(f => selectedFacturasReport.includes(f.id));
+
+  // Cálculos para Reportes Múltiples de Ciclos
+  const mesesDisponibles = useMemo(() => [...new Set(ciclos.map(c => new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})))], [ciclos]);
+  const ciclosFiltradosReport = useMemo(() => ciclos.filter(c => {
+    if (reportMonthFilter === 'Todos') return true;
+    return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
+  }), [ciclos, reportMonthFilter]);
+  
+  const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
+
+  // --- FUNCIONES PARA SELECCIONAR EN REPORTES ---
   const handleToggleFactura = (id) => {
     if (selectedFacturasReport.includes(id)) setSelectedFacturasReport(selectedFacturasReport.filter(x => x !== id));
     else setSelectedFacturasReport([...selectedFacturasReport, id]);
@@ -253,6 +291,31 @@ export default function App() {
     else setSelectedCiclosReport([...selectedCiclosReport, id]);
   };
 
+  // Totales de Impresión
+  const facturasPrintTotals = useMemo(() => {
+    if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
+    return facturasToPrint.reduce((acc, f) => {
+      const bNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+      return { base: acc.base + bNet, iva: acc.iva + f.iva, total: acc.total + f.total };
+    }, { base: 0, iva: 0, total: 0 });
+  }, [facturasToPrint]);
+
+  const ciclosPrintTotals = useMemo(() => {
+    if (!multiCicloToPrint) return { expedientes: 0, base: 0, retenciones: 0, final: 0 };
+    return multiCicloToPrint.reduce((acc, c) => {
+      let exp = 0, b = 0, ret = 0, fin = 0;
+      (c.obras || []).forEach(o => {
+        exp++;
+        const base = parseFloat(o.importe) || 0;
+        const plus = o.tieneRetencion ? base * 0.05 : 0;
+        const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+        b += base; ret += plus; fin += (base + plus + uuii);
+      });
+      return { expedientes: acc.expedientes + exp, base: acc.base + b, retenciones: acc.retenciones + ret, final: acc.final + fin };
+    }, { expedientes: 0, base: 0, retenciones: 0, final: 0 });
+  }, [multiCicloToPrint]);
+
+  // --- FUNCIONES PRINCIPALES ---
   const handleSaveObra = async (e) => {
     e.preventDefault();
     if (!user) return showToast("Esperando conexión...", "info");
@@ -267,6 +330,7 @@ export default function App() {
         updatedBy: user.uid
       };
 
+      // LIMPIEZA VITAL DE DATOS
       Object.keys(obraData).forEach(key => {
         if (obraData[key] === undefined) delete obraData[key];
       });
@@ -371,6 +435,7 @@ export default function App() {
             totalObras: updatedViewCicloObras.length
         });
 
+        // Eliminar las obras de sus ciclos anteriores (si los tuvieran)
         const obrasByOldCiclo = {};
         obrasToMoveRaw.forEach(o => {
             if (o.cicloId && o.cicloId !== viewCiclo.id) {
@@ -408,20 +473,6 @@ export default function App() {
         showToast("Error al importar expedientes", "error");
     }
   };
-
-  const subtotalFactura = useMemo(() => {
-    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
-    return selectedForInvoice.reduce((sum, id) => {
-      const o = viewCiclo.obras.find(x => x.id === id);
-      if(!o) return sum;
-      const base = parseFloat(o.importe) || 0;
-      const plus = o.tieneRetencion ? base * 0.05 : 0;
-      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-      return sum + base + plus + uuii;
-    }, 0);
-  }, [selectedForInvoice, viewCiclo]);
-
-  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
 
   const handleCreateFactura = async (e) => {
     e.preventDefault();
@@ -726,15 +777,19 @@ export default function App() {
     }
   };
 
+  // --- BOTÓN EDITAR (REPARADO Y COMPLETAMENTE SEGURO) ---
   const handleEdit = (obra) => {
     try {
       setEditingObra(obra);
+      
       const safeObra = { ...initialObraState };
       
+      // Pasar datos existentes evitando los nulos que rompen el formulario
       Object.keys(obra).forEach(key => {
         if (obra[key] !== undefined && obra[key] !== null) safeObra[key] = obra[key];
       });
       
+      // Control de fechas antiguas de Firebase
       let fStr = new Date().toISOString().split('T')[0];
       if (safeObra.fecha) {
           try {
@@ -745,6 +800,7 @@ export default function App() {
       }
       safeObra.fecha = fStr;
 
+      // Asegurar que los números son texto para los inputs
       if (safeObra.importe !== undefined) safeObra.importe = safeObra.importe.toString();
       if (safeObra.uuii !== undefined) safeObra.uuii = safeObra.uuii.toString();
 
@@ -876,45 +932,6 @@ export default function App() {
     if (activeTab !== 'cierres') { setViewCiclo(null); setSelectedForInvoice([]); }
   }, [activeTab]);
 
-  const clientesDisponibles = useMemo(() => [...new Set(facturas.map(f => f.cliente?.nombre).filter(Boolean))], [facturas]);
-  const facturasFiltradasReport = useMemo(() => facturas.filter(f => {
-    if (facturasReportClientFilter === 'Todos') return true;
-    return f.cliente?.nombre === facturasReportClientFilter;
-  }), [facturas, facturasReportClientFilter]);
-  
-  const todasFacturasSeleccionadas = facturasFiltradasReport.length > 0 && facturasFiltradasReport.every(f => selectedFacturasReport.includes(f.id));
-
-  const mesesDisponibles = useMemo(() => [...new Set(ciclos.map(c => new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})))], [ciclos]);
-  const ciclosFiltradosReport = useMemo(() => ciclos.filter(c => {
-    if (reportMonthFilter === 'Todos') return true;
-    return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
-  }), [ciclos, reportMonthFilter]);
-  
-  const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
-
-  const facturasPrintTotals = useMemo(() => {
-    if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
-    return facturasToPrint.reduce((acc, f) => {
-      const bNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
-      return { base: acc.base + bNet, iva: acc.iva + f.iva, total: acc.total + f.total };
-    }, { base: 0, iva: 0, total: 0 });
-  }, [facturasToPrint]);
-
-  const ciclosPrintTotals = useMemo(() => {
-    if (!multiCicloToPrint) return { expedientes: 0, base: 0, retenciones: 0, final: 0 };
-    return multiCicloToPrint.reduce((acc, c) => {
-      let exp = 0, b = 0, ret = 0, fin = 0;
-      (c.obras || []).forEach(o => {
-        exp++;
-        const base = parseFloat(o.importe) || 0;
-        const plus = o.tieneRetencion ? base * 0.05 : 0;
-        const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-        b += base; ret += plus; fin += (base + plus + uuii);
-      });
-      return { expedientes: acc.expedientes + exp, base: acc.base + b, retenciones: acc.retenciones + ret, final: acc.final + fin };
-    }, { expedientes: 0, base: 0, retenciones: 0, final: 0 });
-  }, [multiCicloToPrint]);
-
   const isPrintingDoc = invoiceToPrint || facturasToPrint || multiCicloToPrint;
 
   return (
@@ -938,106 +955,169 @@ export default function App() {
         .print-header, .invoice-wrapper { display: none; }
       `}</style>
 
-      {}
-      {/* PLANTILLAS IMPRESION */}
-      {facturasToPrint && (
-        <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
-          <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
-            <div>
-              <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REPORTE DE FACTURACIÓN</h1>
-              <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">REDES CARRERAS S.L.</p>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
-              <p className="text-sm text-gray-500">{facturasToPrint.length} Facturas Exportadas</p>
-            </div>
-          </div>
-          <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Facturas</p><p className="font-black text-lg">{facturasToPrint.length}</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Neta</p><p className="font-bold text-lg text-gray-800">{facturasPrintTotals.base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma IVA (21%)</p><p className="font-bold text-lg text-blue-700">{facturasPrintTotals.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total A Cobrar</p><p className="font-black text-xl text-green-700">{facturasPrintTotals.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-          </div>
-          <table className="w-full invoice-table text-xs border-collapse">
-            <thead>
-              <tr>
-                <th className="w-24">Nº Factura</th><th className="w-24">Fecha</th><th>Cliente</th>
-                <th className="w-24 text-right">Base Neta</th><th className="w-24 text-right">IVA</th>
-                <th className="w-24 text-right">Retención</th><th className="w-28 text-right bg-gray-100">A Cobrar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {facturasToPrint.map(f => {
-                const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
-                return (
-                  <tr key={f.id} className="border-b border-gray-100">
-                    <td className="font-bold text-red-600">{f.numFactura}</td><td className="text-gray-600">{new Date(f.fecha).toLocaleDateString()}</td><td className="font-medium text-gray-800">{f.cliente.nombre}</td>
-                    <td className="text-right">{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td><td className="text-right">{f.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                    <td className="text-right text-red-500">{f.retencion > 0 ? `-${f.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €` : '-'}</td>
-                    <td className="text-right font-black text-gray-900 bg-gray-50/50">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* PLANTILLA REPORTE DE FACTURAS EMITIDAS */}
+      {facturasToPrint && (() => {
+        let totalBase = 0; let totalIva = 0; let totalCobrar = 0;
+        facturasToPrint.forEach(f => {
+          const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+          totalBase += baseNet;
+          totalIva += f.iva;
+          totalCobrar += f.total;
+        });
 
-      {multiCicloToPrint && (
-        <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
-          <div className="flex justify-between border-b-2 border-gray-800 pb-4 mb-6 items-end">
-            <div>
-              <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none mb-1">REPORTE DE CICLOS</h1>
-              <p className="font-bold text-sm text-gray-500 uppercase tracking-widest">REDES CARRERAS S.L.</p>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
-              <p className="text-sm text-gray-500">{multiCicloToPrint.length} Ciclos Exportados</p>
-            </div>
-          </div>
-          <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Expedientes</p><p className="font-black text-lg">{ciclosPrintTotals.expedientes}</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Imponible</p><p className="font-bold text-lg text-gray-800">{ciclosPrintTotals.base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Retenciones (5%)</p><p className="font-bold text-lg text-blue-700">{ciclosPrintTotals.retenciones.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-            <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Valor Total (Con Plus)</p><p className="font-black text-xl text-green-700">{ciclosPrintTotals.final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
-          </div>
-          {multiCicloToPrint.map(ciclo => (
-            <div key={ciclo.id} className="mb-8 break-inside-avoid">
-              <div className="flex justify-between items-end border-b-2 border-gray-300 pb-2 mb-3">
-                <h3 className="font-bold text-lg text-gray-800 uppercase">{ciclo.nombre}</h3>
-                <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">{new Date(ciclo.fecha).toLocaleDateString('es-ES')}</span>
+        return (
+          <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
+            <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
+              <div>
+                <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REPORTE DE FACTURACIÓN</h1>
+                <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">REDES CARRERAS S.L.</p>
               </div>
-              <table className="w-full invoice-table text-xs border-collapse">
-                <thead><tr><th className="w-20">Fecha</th><th className="w-24">ID Carreras</th><th>Central / Obra</th><th className="w-24 text-right">Base</th><th className="w-24 text-right">Total 5% Incl.</th></tr></thead>
-                <tbody>
-                  {(ciclo.obras || []).length === 0 && <tr><td colSpan="5" className="text-center italic text-gray-500 py-2">Ciclo vacío</td></tr>}
-                  {(ciclo.obras || []).map(o => {
-                    const base = parseFloat(o.importe) || 0;
-                    const plus = o.tieneRetencion ? base * 0.05 : 0;
-                    const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-                    const final = base + plus + uuii;
-                    return (
-                      <tr key={o.id} className="border-b border-gray-100">
-                        <td className="text-gray-600">{new Date(o.fecha).toLocaleDateString()}</td><td className="font-mono font-bold">{o.idCarreras}</td><td><span className="font-bold">{o.central}</span> - {o.nombre}</td>
-                        <td className="text-right">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td><td className="text-right font-bold text-gray-900">{final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <div className="text-right">
+                <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
+                <p className="text-sm text-gray-500">{facturasToPrint.length} Facturas Exportadas</p>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
 
+            <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Facturas</p><p className="font-black text-lg">{facturasToPrint.length}</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Neta</p><p className="font-bold text-lg text-gray-800">{totalBase.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma IVA (21%)</p><p className="font-bold text-lg text-blue-700">{totalIva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total A Cobrar</p><p className="font-black text-xl text-green-700">{totalCobrar.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            </div>
+
+            <table className="w-full invoice-table text-xs border-collapse">
+              <thead>
+                <tr>
+                  <th className="w-24">Nº Factura</th>
+                  <th className="w-24">Fecha</th>
+                  <th>Cliente</th>
+                  <th className="w-24 text-right">Base Neta</th>
+                  <th className="w-24 text-right">IVA</th>
+                  <th className="w-24 text-right">Retención</th>
+                  <th className="w-28 text-right bg-gray-100">A Cobrar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {facturasToPrint.length === 0 && <tr><td colSpan="7" className="text-center italic text-gray-500 py-2">Ninguna factura seleccionada</td></tr>}
+                {facturasToPrint.map(f => {
+                  const baseNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+                  return (
+                    <tr key={f.id} className="border-b border-gray-100">
+                      <td className="font-bold text-red-600">{f.numFactura}</td>
+                      <td className="text-gray-600">{new Date(f.fecha).toLocaleDateString()}</td>
+                      <td className="font-medium text-gray-800">{f.cliente.nombre}</td>
+                      <td className="text-right">{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                      <td className="text-right">{f.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                      <td className="text-right text-red-500">{f.retencion > 0 ? `-${f.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €` : '-'}</td>
+                      <td className="text-right font-black text-gray-900 bg-gray-50/50">{f.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
+      {/* PLANTILLA DE REPORTE DE CICLOS MÚLTIPLES PARA IMPRESIÓN */}
+      {multiCicloToPrint && (() => {
+        let totalExpedientes = 0; let totalBase = 0; let totalRetenciones = 0; let totalFinal = 0;
+        multiCicloToPrint.forEach(c => {
+          (c.obras || []).forEach(o => {
+            totalExpedientes++;
+            const b = parseFloat(o.importe) || 0;
+            const p = o.tieneRetencion ? b * 0.05 : 0;
+            const u = (parseFloat(o.uuii) || 0) * 1.5;
+            totalBase += b; totalRetenciones += p; totalFinal += (b + p + u);
+          });
+        });
+
+        return (
+          <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
+            <div className="flex justify-between border-b-2 border-gray-800 pb-4 mb-6 items-end">
+              <div>
+                <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none mb-1">REPORTE DE CICLOS</h1>
+                <p className="font-bold text-sm text-gray-500 uppercase tracking-widest">REDES CARRERAS S.L.</p>
+              </div>
+              <div className="text-right">
+                <p className="font-bold text-gray-800">Fecha: {new Date().toLocaleDateString('es-ES')}</p>
+                <p className="text-sm text-gray-500">{multiCicloToPrint.length} Ciclos Exportados</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-4 gap-4 border border-gray-200 text-sm">
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Expedientes</p><p className="font-black text-lg">{totalExpedientes}</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Suma Base Imponible</p><p className="font-bold text-lg text-gray-800">{totalBase.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Retenciones (5%)</p><p className="font-bold text-lg text-blue-700">{totalRetenciones.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+              <div><p className="text-gray-500 text-xs font-bold uppercase mb-1">Valor Total (Con Plus)</p><p className="font-black text-xl text-green-700">{totalFinal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</p></div>
+            </div>
+
+            {multiCicloToPrint.map(ciclo => (
+              <div key={ciclo.id} className="mb-8 break-inside-avoid">
+                <div className="flex justify-between items-end border-b-2 border-gray-300 pb-2 mb-3">
+                  <h3 className="font-bold text-lg text-gray-800 uppercase">{ciclo.nombre}</h3>
+                  <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">{new Date(ciclo.fecha).toLocaleDateString('es-ES')}</span>
+                </div>
+                <table className="w-full invoice-table text-xs border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="w-20">Fecha</th>
+                      <th className="w-24">ID Carreras</th>
+                      <th>Central / Obra</th>
+                      <th className="w-24 text-right">Base</th>
+                      <th className="w-24 text-right">Total 5% Incl.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(ciclo.obras || []).length === 0 && <tr><td colSpan="5" className="text-center italic text-gray-500 py-2">Ciclo vacío</td></tr>}
+                    {(ciclo.obras || []).map(o => {
+                      const base = parseFloat(o.importe) || 0;
+                      const plus = o.tieneRetencion ? base * 0.05 : 0;
+                      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+                      const final = base + plus + uuii;
+                      return (
+                        <tr key={o.id} className="border-b border-gray-100">
+                          <td className="text-gray-600">{new Date(o.fecha).toLocaleDateString()}</td>
+                          <td className="font-mono font-bold">{o.idCarreras}</td>
+                          <td><span className="font-bold">{o.central}</span> - {o.nombre}</td>
+                          <td className="text-right">{base.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                          <td className="text-right font-bold text-gray-900">{final.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* PLANTILLA DE FACTURA PARA IMPRESIÓN */}
       {invoiceToPrint && (
         <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50">
           <div className="flex justify-between border-b-2 border-red-600 pb-4 mb-6 items-end">
-            <div><h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REDES CARRERAS S.L.</h1><p className="font-bold text-sm text-gray-700 uppercase tracking-widest">Telecomunicaciones</p></div>
+            <div>
+              <h1 className="text-3xl font-extrabold text-red-600 tracking-tight leading-none mb-1">REDES CARRERAS S.L.</h1>
+              <p className="font-bold text-sm text-gray-700 uppercase tracking-widest">Telecomunicaciones</p>
+            </div>
           </div>
           <div className="flex justify-between mb-10 text-sm">
-            <div className="w-5/12"><h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Empresa</h3><p className="font-bold text-base mb-1">REDES CARRERAS S.L.</p><p>CIF: B87152963</p><p>CALLE LAGUNA DEL MARQUESADO</p><p>Nº.30 NAVE: D</p><p>MADRID, CP: 28021</p><p>TEL: 630241775</p></div>
-            <div className="w-5/12"><h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Facturar A</h3><p className="font-bold text-base mb-1">{invoiceToPrint.cliente.nombre}</p><p>CIF: {invoiceToPrint.cliente.cif}</p><p className="whitespace-pre-line leading-relaxed">{invoiceToPrint.cliente.direccion}</p></div>
+            <div className="w-5/12">
+              <h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Empresa</h3>
+              <p className="font-bold text-base mb-1">REDES CARRERAS S.L.</p>
+              <p>CIF: B87152963</p>
+              <p>CALLE LAGUNA DEL MARQUESADO</p>
+              <p>Nº.30 NAVE: D</p>
+              <p>MADRID, CP: 28021</p>
+              <p>TEL: 630241775</p>
+            </div>
+            <div className="w-5/12">
+              <h3 className="font-extrabold border-b border-gray-300 pb-1 mb-3 text-gray-500 uppercase text-xs">Facturar A</h3>
+              <p className="font-bold text-base mb-1">{invoiceToPrint.cliente.nombre}</p>
+              <p>CIF: {invoiceToPrint.cliente.cif}</p>
+              <p className="whitespace-pre-line leading-relaxed">{invoiceToPrint.cliente.direccion}</p>
+            </div>
           </div>
           <div className="bg-gray-100/80 p-5 rounded-lg mb-8 grid grid-cols-2 gap-y-3 border border-gray-200 text-sm">
             {invoiceToPrint.contrato && <p><span className="font-bold text-gray-600">N.º DE CONTRATO:</span> <span className="font-medium">{invoiceToPrint.contrato}</span></p>}
@@ -1046,33 +1126,82 @@ export default function App() {
             <p><span className="font-bold text-gray-600">Fecha de Emisión:</span> <span className="font-medium">{new Date(invoiceToPrint.fecha).toLocaleDateString('es-ES')}</span></p>
           </div>
           <table className="w-full invoice-table mb-10 text-sm border-collapse">
-            <thead><tr><th className="w-12 text-center text-gray-600">N.º</th><th className="text-gray-600">Descripción de los Trabajos (ID - Obra)</th><th className="w-32 text-right text-gray-600">Importe</th></tr></thead>
+            <thead>
+              <tr>
+                <th className="w-12 text-center text-gray-600">N.º</th>
+                <th className="text-gray-600">Descripción de los Trabajos (ID - Obra)</th>
+                <th className="w-32 text-right text-gray-600">Importe</th>
+              </tr>
+            </thead>
             <tbody>
-              {invoiceToPrint.obras.length === 0 && <tr className="border-b border-gray-100"><td colSpan="3" className="text-center py-4 text-gray-500 italic">Factura generada manualmente</td></tr>}
+              {invoiceToPrint.obras.length === 0 && (
+                <tr className="border-b border-gray-100"><td colSpan="3" className="text-center py-4 text-gray-500 italic">Factura generada manualmente</td></tr>
+              )}
               {invoiceToPrint.obras.map((obra, idx) => (
                 <tr key={idx} className="border-b border-gray-100">
-                  <td className="text-center font-bold text-gray-400">{idx + 1}</td><td><span className="font-mono text-gray-600 mr-2">{obra.idCarreras}</span><span className="font-medium">{obra.nombre}</span></td><td className="text-right font-medium">{obra.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
+                  <td className="text-center font-bold text-gray-400">{idx + 1}</td>
+                  <td>
+                    <span className="font-mono text-gray-600 mr-2">{obra.idCarreras}</span> 
+                    <span className="font-medium">{obra.nombre}</span>
+                  </td>
+                  <td className="text-right font-medium">{obra.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="flex justify-end mb-10">
             <div className="w-80 bg-gray-50/50 border border-gray-300 p-4 rounded-lg text-sm">
-              <div className="flex justify-between font-bold border-b border-gray-200 pb-2 mb-3"><span className="text-gray-600">TOTAL BRUTO:</span><span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-              {invoiceToPrint.prontoPago > 0 && <div className="flex justify-between mb-2 text-blue-600 font-medium border-b border-gray-100 pb-2"><span>{invoiceToPrint.prontoPagoTipo || 5}% PRONTO PAGO:</span><span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-              {invoiceToPrint.descuentoManual > 0 && <div className="flex justify-between mb-2 text-purple-600 font-medium border-b border-gray-100 pb-2"><span>DESCUENTO MANUAL:</span><span>-{invoiceToPrint.descuentoManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-              {(invoiceToPrint.prontoPago > 0 || invoiceToPrint.descuentoManual > 0) && <div className="flex justify-between font-bold mb-3 text-gray-700"><span>BASE IMPONIBLE NETA:</span><span>{(invoiceToPrint.subtotal - (invoiceToPrint.prontoPago || 0) - (invoiceToPrint.descuentoManual || 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-              {invoiceToPrint.retencion > 0 && <div className="flex justify-between mb-2 text-red-600 font-medium mt-2"><span>5% RETENCIÓN:</span><span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-              <div className="flex justify-between mb-3 text-gray-700 font-medium mt-2"><span>IVA 21%:</span><span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-              <div className="flex justify-between font-black text-lg border-t-2 border-red-600 pt-3 text-gray-900 mt-2"><span>A COBRAR:</span><span>{invoiceToPrint.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
+              <div className="flex justify-between font-bold border-b border-gray-200 pb-2 mb-3">
+                <span className="text-gray-600">TOTAL BRUTO:</span>
+                <span>{invoiceToPrint.subtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+              </div>
+              
+              {invoiceToPrint.prontoPago > 0 && (
+                <div className="flex justify-between mb-2 text-blue-600 font-medium border-b border-gray-100 pb-2">
+                  <span>{invoiceToPrint.prontoPagoTipo || 5}% PRONTO PAGO:</span>
+                  <span>-{invoiceToPrint.prontoPago.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                </div>
+              )}
+              {invoiceToPrint.descuentoManual > 0 && (
+                <div className="flex justify-between mb-2 text-purple-600 font-medium border-b border-gray-100 pb-2">
+                  <span>DESCUENTO MANUAL:</span>
+                  <span>-{invoiceToPrint.descuentoManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                </div>
+              )}
+              {(invoiceToPrint.prontoPago > 0 || invoiceToPrint.descuentoManual > 0) && (
+                <div className="flex justify-between font-bold mb-3 text-gray-700">
+                  <span>BASE IMPONIBLE NETA:</span>
+                  <span>{(invoiceToPrint.subtotal - (invoiceToPrint.prontoPago || 0) - (invoiceToPrint.descuentoManual || 0)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                </div>
+              )}
+              
+              {invoiceToPrint.retencion > 0 && (
+                <div className="flex justify-between mb-2 text-red-600 font-medium mt-2">
+                  <span>5% RETENCIÓN:</span>
+                  <span>-{invoiceToPrint.retencion.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                </div>
+              )}
+              
+              <div className="flex justify-between mb-3 text-gray-700 font-medium mt-2">
+                <span>IVA 21%:</span>
+                <span>{invoiceToPrint.iva.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+              </div>
+              <div className="flex justify-between font-black text-lg border-t-2 border-red-600 pt-3 text-gray-900 mt-2">
+                <span>A COBRAR:</span>
+                <span>{invoiceToPrint.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+              </div>
             </div>
           </div>
-          <div className="font-bold border-t-2 border-red-600 pt-4 text-sm text-gray-800"><p>FORMA DE PAGO: <span className="font-black ml-2">{invoiceToPrint.formaPago}</span></p></div>
-          <p className="text-center text-[10px] text-gray-400 mt-16 pt-4 border-t border-gray-100">Factura generada por Sistema de Facturación REDES CARRERAS S.L</p>
+          <div className="font-bold border-t-2 border-red-600 pt-4 text-sm text-gray-800">
+            <p>FORMA DE PAGO: <span className="font-black ml-2">{invoiceToPrint.formaPago}</span></p>
+          </div>
+          <p className="text-center text-[10px] text-gray-400 mt-16 pt-4 border-t border-gray-100">
+            Factura generada por Sistema de Facturación REDES CARRERAS S.L
+          </p>
         </div>
       )}
 
-      {}
+      {/* INTERFAZ PRINCIPAL */}
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden hide-on-invoice-print">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
@@ -1094,10 +1223,7 @@ export default function App() {
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
              <div><h1 className="text-3xl font-bold text-gray-900 leading-none">REDES CARRERAS S.L.</h1><p className="text-base text-gray-600 mt-1">Informe de Gestión</p></div>
           </div>
-          <div className="text-right text-xs text-gray-500">
-             <p className="font-bold">{new Date().toLocaleDateString()}</p>
-             {viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}
-          </div>
+          <div className="text-right text-xs text-gray-500"><p className="font-bold">{new Date().toLocaleDateString()}</p>{viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}</div>
         </div>
 
         <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10 no-print">
@@ -1161,7 +1287,12 @@ export default function App() {
                             <td className="px-6 py-4 font-bold text-gray-900">{Number(obra.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                             <td className="px-6 py-4 text-center font-bold text-blue-800">{totalConPlus.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
                             <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-full text-xs font-bold ${obra.estado === 'cobrado' ? 'bg-green-100 text-green-700' : obra.estado === 'facturado' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{obra.estado.toUpperCase()}</span></td>
-                            <td className="px-6 py-4 text-right no-print"><div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button><button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button></div></td>
+                            <td className="px-6 py-4 text-right no-print">
+                              <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleEdit(obra)} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
+                                <button onClick={() => handleDelete(obra.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                              </div>
+                            </td>
                           </tr>
                         )})}
                       </tbody>
@@ -1293,6 +1424,8 @@ export default function App() {
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
                 <button onClick={() => setViewCiclo(null)} className="flex items-center gap-2 text-gray-600 hover:text-red-600 font-bold"><ArrowLeft size={18}/> Volver al Historial</button>
                 <div className="flex items-center gap-4">
+                  <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                  <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
                   <button onClick={() => setShowImportObrasModal(true)} className="px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all bg-blue-100 text-blue-700 hover:bg-blue-200"><FolderOpen size={16} /> Importar Pendientes</button>
                   <button onClick={handlePrint} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-200 font-bold"><Printer size={16} /> Imprimir Lote</button>
                   <button disabled={selectedForInvoice.length === 0} onClick={() => setInvoiceModalOpen(true)} className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})</button>
@@ -1588,7 +1721,8 @@ export default function App() {
         </div>
       </main>
 
-      {}
+      {/* --- MODALES O VENTANAS EMERGENTES --- */}
+
       {/* MODAL IMPORTAR OBRAS A CICLO */}
       {showImportObrasModal && (() => {
         const obrasDisponiblesParaImportar = obras.filter(o => 
@@ -1712,7 +1846,17 @@ export default function App() {
       )}
 
       {/* MODAL EDICIÓN DE FACTURAS */}
-      {editingFactura && (
+      {editingFactura && (() => {
+        const subtotal = parseFloat(editingFactura.subtotal) || 0;
+        const ppRate = parseFloat(editingFactura.prontoPagoTipo) || 0;
+        const ppAmount = subtotal * (ppRate / 100);
+        const descManual = parseFloat(editingFactura.descuentoManual) || 0;
+        const baseNet = subtotal - ppAmount - descManual;
+        const ivaAmount = baseNet * 0.21;
+        const retAmount = editingFactura.retencionEnabled ? subtotal * 0.05 : 0;
+        const totalAmount = baseNet + ivaAmount - retAmount;
+
+        return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col">
             <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1725,8 +1869,8 @@ export default function App() {
               try {
                 await updateDoc(doc(db, "facturas", editingFactura.id), {
                   fecha: editingFactura.fecha, contrato: editingFactura.contrato || '', pedido: editingFactura.pedido || '',
-                  cliente: editingFactura.cliente, subtotal: editSubtotal, retencion: editRetAmount, prontoPago: editPpAmount,
-                  prontoPagoTipo: editPpRate, descuentoManual: editDescManual, iva: editIvaAmount, total: editTotalAmount
+                  cliente: editingFactura.cliente, subtotal: subtotal, retencion: retAmount, prontoPago: ppAmount,
+                  prontoPagoTipo: ppRate, descuentoManual: descManual, iva: ivaAmount, total: totalAmount
                 });
                 showToast("Factura actualizada con éxito", "success");
                 setEditingFactura(null);
@@ -1790,9 +1934,9 @@ export default function App() {
               </div>
               
               <div className="bg-gray-100 p-4 rounded-lg flex justify-between items-center text-sm font-medium border border-gray-200">
-                <span className="text-gray-600">Base Neta: {editBaseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                <span className="text-gray-600">IVA: {editIvaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                <span className="text-green-700 font-bold text-lg">Total: {editTotalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-gray-600">Base Neta: {baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-gray-600">IVA: {ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
+                <span className="text-green-700 font-bold text-lg">Total: {totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
               </div>
 
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-2">
@@ -1802,7 +1946,8 @@ export default function App() {
             </form>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* MODAL EDICIÓN RETENCIÓN MANUAL */}
       {editingRetencion && (
@@ -1858,7 +2003,22 @@ export default function App() {
       )}
 
       {/* MODAL REPORTE DE FACTURAS EMITIDAS */}
-      {showFacturasReportModal && (
+      {showFacturasReportModal && (() => {
+        const clientesDisponibles = [...new Set(facturas.map(f => f.cliente.nombre))];
+        
+        const facturasFiltradas = facturas.filter(f => {
+          if (facturasReportClientFilter === 'Todos') return true;
+          return f.cliente.nombre === facturasReportClientFilter;
+        });
+        
+        const todasSeleccionadas = facturasFiltradas.length > 0 && facturasFiltradas.every(f => selectedFacturasReport.includes(f.id));
+
+        const handleToggleFactura = (id) => {
+          if (selectedFacturasReport.includes(id)) setSelectedFacturasReport(selectedFacturasReport.filter(x => x !== id));
+          else setSelectedFacturasReport([...selectedFacturasReport, id]);
+        };
+
+        return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
             <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1882,12 +2042,12 @@ export default function App() {
                     <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 text-center w-12">
-                          <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={todasFacturasSeleccionadas} onChange={(e) => {
+                          <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={todasSeleccionadas} onChange={(e) => {
                             if (e.target.checked) {
-                              const ids = facturasFiltradasReport.map(f => f.id);
+                              const ids = facturasFiltradas.map(f => f.id);
                               setSelectedFacturasReport([...new Set([...selectedFacturasReport, ...ids])]);
                             } else {
-                              const idsToRem = facturasFiltradasReport.map(f => f.id);
+                              const idsToRem = facturasFiltradas.map(f => f.id);
                               setSelectedFacturasReport(selectedFacturasReport.filter(id => !idsToRem.includes(id)));
                             }
                           }}/>
@@ -1899,8 +2059,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {facturasFiltradasReport.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-400 italic">No hay facturas con este filtro.</td></tr>}
-                      {facturasFiltradasReport.map(f => (
+                      {facturasFiltradas.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-400 italic">No hay facturas con este filtro.</td></tr>}
+                      {facturasFiltradas.map(f => (
                         <tr key={f.id} className={`cursor-pointer transition-colors ${selectedFacturasReport.includes(f.id) ? 'bg-red-50/50' : 'hover:bg-gray-50'}`} onClick={() => handleToggleFactura(f.id)}>
                           <td className="px-4 py-3 text-center">
                             <input type="checkbox" className="w-4 h-4 rounded text-red-600 cursor-pointer" checked={selectedFacturasReport.includes(f.id)} readOnly />
@@ -1941,10 +2101,28 @@ export default function App() {
               </div>
             </div>
           </div>
-      )}
+        );
+      })()}
 
       {/* MODAL REPORTE MULTIPLE DE CICLOS */}
-      {showReportModal && (
+      {showReportModal && (() => {
+        const mesesDisponibles = [...new Set(ciclos.map(c => {
+          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})
+        }))];
+        
+        const ciclosFiltrados = ciclos.filter(c => {
+          if (reportMonthFilter === 'Todos') return true;
+          return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
+        });
+        
+        const todosSeleccionados = ciclosFiltrados.length > 0 && ciclosFiltrados.every(c => selectedCiclosReport.includes(c.id));
+
+        const handleToggleCiclo = (id) => {
+          if (selectedCiclosReport.includes(id)) setSelectedCiclosReport(selectedCiclosReport.filter(x => x !== id));
+          else setSelectedCiclosReport([...selectedCiclosReport, id]);
+        };
+
+        return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
             <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
@@ -1968,12 +2146,12 @@ export default function App() {
                     <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 text-center w-12">
-                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={todosCiclosSeleccionados} onChange={(e) => {
+                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={todosSeleccionados} onChange={(e) => {
                             if (e.target.checked) {
-                              const ids = ciclosFiltradosReport.map(c => c.id);
+                              const ids = ciclosFiltrados.map(c => c.id);
                               setSelectedCiclosReport([...new Set([...selectedCiclosReport, ...ids])]);
                             } else {
-                              const idsToRem = ciclosFiltradosReport.map(c => c.id);
+                              const idsToRem = ciclosFiltrados.map(c => c.id);
                               setSelectedCiclosReport(selectedCiclosReport.filter(id => !idsToRem.includes(id)));
                             }
                           }}/>
@@ -1984,8 +2162,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {ciclosFiltradosReport.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-400 italic">No hay ciclos en este mes.</td></tr>}
-                      {ciclosFiltradosReport.map(c => (
+                      {ciclosFiltrados.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-400 italic">No hay ciclos en este mes.</td></tr>}
+                      {ciclosFiltrados.map(c => (
                         <tr key={c.id} className={`cursor-pointer transition-colors ${selectedCiclosReport.includes(c.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`} onClick={() => handleToggleCiclo(c.id)}>
                           <td className="px-4 py-3 text-center">
                             <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={selectedCiclosReport.includes(c.id)} readOnly />
@@ -2024,7 +2202,8 @@ export default function App() {
               </div>
             </div>
           </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
