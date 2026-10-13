@@ -73,6 +73,7 @@ export default function App() {
   const [viewCiclo, setViewCiclo] = useState(null);
   const [confirmCierre, setConfirmCierre] = useState(false);
   const [cierreEmpresa, setCierreEmpresa] = useState('Todas');
+  const [cierreEncargado, setCierreEncargado] = useState('Todos');
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   // ESTADOS MÓDULO FACTURAS
@@ -111,6 +112,10 @@ export default function App() {
   const [selectedFacturasReport, setSelectedFacturasReport] = useState([]);
   const [facturasReportClientFilter, setFacturasReportClientFilter] = useState('Todos');
   const [facturasToPrint, setFacturasToPrint] = useState(null);
+
+  // ESTADOS IMPORTAR OBRAS A CICLO
+  const [showImportObrasModal, setShowImportObrasModal] = useState(false);
+  const [selectedObrasToImport, setSelectedObrasToImport] = useState([]);
 
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientData, setNewClientData] = useState({ nombre: '', cif: '', direccion: '' });
@@ -238,69 +243,6 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
-  // --- CÁLCULOS SEGUROS PARA FACTURAS Y MODALES ---
-  const subtotalFactura = useMemo(() => {
-    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
-    return selectedForInvoice.reduce((sum, id) => {
-      const o = viewCiclo.obras.find(x => x.id === id);
-      if(!o) return sum;
-      const base = parseFloat(o.importe) || 0;
-      const plus = o.tieneRetencion ? base * 0.05 : 0;
-      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-      return sum + base + plus + uuii;
-    }, 0);
-  }, [selectedForInvoice, viewCiclo]);
-
-  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
-
-  // Calculos Factura Oficial
-  const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
-  const ppAmount = effectiveSubtotalDisplay * (ppRate / 100);
-  const descManualAmount = parseFloat(invoiceForm.descuentoManual) || 0;
-  const baseNet = effectiveSubtotalDisplay - ppAmount - descManualAmount;
-  const ivaAmount = baseNet * 0.21;
-  const retAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0;
-  const totalAmount = baseNet + ivaAmount - retAmount;
-
-  // Calculos Factura Manual
-  const manualSubtotal = parseFloat(manualInvoiceForm.subtotal) || 0;
-  const manualPpRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
-  const manualPpAmount = manualSubtotal * (manualPpRate / 100);
-  const manualDescManual = parseFloat(manualInvoiceForm.descuentoManual) || 0;
-  const manualBaseNet = manualSubtotal - manualPpAmount - manualDescManual;
-  const manualIvaAmount = manualBaseNet * 0.21;
-  const manualRetAmount = manualInvoiceForm.retencion ? manualSubtotal * 0.05 : 0;
-  const manualTotalAmount = manualBaseNet + manualIvaAmount - manualRetAmount;
-
-  // Calculos Edición Factura
-  const editSubtotal = editingFactura ? (parseFloat(editingFactura.subtotal) || 0) : 0;
-  const editPpRate = editingFactura ? (parseFloat(editingFactura.prontoPagoTipo) || 0) : 0;
-  const editPpAmount = editSubtotal * (editPpRate / 100);
-  const editDescManual = editingFactura ? (parseFloat(editingFactura.descuentoManual) || 0) : 0;
-  const editBaseNet = editSubtotal - editPpAmount - editDescManual;
-  const editIvaAmount = editBaseNet * 0.21;
-  const editRetAmount = (editingFactura && editingFactura.retencionEnabled) ? editSubtotal * 0.05 : 0;
-  const editTotalAmount = editBaseNet + editIvaAmount - editRetAmount;
-
-  // Cálculos para Reportes Múltiples de Facturas
-  const clientesDisponibles = useMemo(() => [...new Set(facturas.map(f => f.cliente?.nombre).filter(Boolean))], [facturas]);
-  const facturasFiltradasReport = useMemo(() => facturas.filter(f => {
-    if (facturasReportClientFilter === 'Todos') return true;
-    return f.cliente?.nombre === facturasReportClientFilter;
-  }), [facturas, facturasReportClientFilter]);
-  
-  const todasFacturasSeleccionadas = facturasFiltradasReport.length > 0 && facturasFiltradasReport.every(f => selectedFacturasReport.includes(f.id));
-
-  // Cálculos para Reportes Múltiples de Ciclos
-  const mesesDisponibles = useMemo(() => [...new Set(ciclos.map(c => new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})))], [ciclos]);
-  const ciclosFiltradosReport = useMemo(() => ciclos.filter(c => {
-    if (reportMonthFilter === 'Todos') return true;
-    return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
-  }), [ciclos, reportMonthFilter]);
-  
-  const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
-
-  // --- FUNCIONES PARA SELECCIONAR EN REPORTES ---
   const handleToggleFactura = (id) => {
     if (selectedFacturasReport.includes(id)) setSelectedFacturasReport(selectedFacturasReport.filter(x => x !== id));
     else setSelectedFacturasReport([...selectedFacturasReport, id]);
@@ -311,31 +253,6 @@ export default function App() {
     else setSelectedCiclosReport([...selectedCiclosReport, id]);
   };
 
-  // Totales de Impresión
-  const facturasPrintTotals = useMemo(() => {
-    if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
-    return facturasToPrint.reduce((acc, f) => {
-      const bNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
-      return { base: acc.base + bNet, iva: acc.iva + f.iva, total: acc.total + f.total };
-    }, { base: 0, iva: 0, total: 0 });
-  }, [facturasToPrint]);
-
-  const ciclosPrintTotals = useMemo(() => {
-    if (!multiCicloToPrint) return { expedientes: 0, base: 0, retenciones: 0, final: 0 };
-    return multiCicloToPrint.reduce((acc, c) => {
-      let exp = 0, b = 0, ret = 0, fin = 0;
-      (c.obras || []).forEach(o => {
-        exp++;
-        const base = parseFloat(o.importe) || 0;
-        const plus = o.tieneRetencion ? base * 0.05 : 0;
-        const uuii = (parseFloat(o.uuii) || 0) * 1.5;
-        b += base; ret += plus; fin += (base + plus + uuii);
-      });
-      return { expedientes: acc.expedientes + exp, base: acc.base + b, retenciones: acc.retenciones + ret, final: acc.final + fin };
-    }, { expedientes: 0, base: 0, retenciones: 0, final: 0 });
-  }, [multiCicloToPrint]);
-
-  // --- FUNCIONES PRINCIPALES ---
   const handleSaveObra = async (e) => {
     e.preventDefault();
     if (!user) return showToast("Esperando conexión...", "info");
@@ -350,7 +267,6 @@ export default function App() {
         updatedBy: user.uid
       };
 
-      // LIMPIEZA VITAL DE DATOS: Firebase colapsa si intentamos guardar valores "undefined"
       Object.keys(obraData).forEach(key => {
         if (obraData[key] === undefined) delete obraData[key];
       });
@@ -379,8 +295,14 @@ export default function App() {
 
   const handleCerrarCiclo = async () => {
     if (!user) return;
-    const obrasPendientes = obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa));
-    if (obrasPendientes.length === 0) return showToast(`No hay obras pendientes ${cierreEmpresa !== 'Todas' ? `para ${cierreEmpresa}` : ''}.`, "warning");
+    
+    const obrasPendientes = obras.filter(o => 
+      o.estado === 'pendiente' && 
+      (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa) && 
+      (cierreEncargado === 'Todos' || o.encargado === cierreEncargado)
+    );
+    
+    if (obrasPendientes.length === 0) return showToast(`No hay obras pendientes con los filtros seleccionados.`, "warning");
 
     setConfirmCierre(false);
     showToast("Cerrando ciclo...", "info");
@@ -394,12 +316,21 @@ export default function App() {
         return clean;
       });
 
-      const prefix = cierreEmpresa === 'Todas' ? 'Cierre General' : `Cierre ${cierreEmpresa}`;
+      let prefix = "Cierre";
+      if (cierreEmpresa !== 'Todas') prefix += ` ${cierreEmpresa}`;
+      if (cierreEncargado !== 'Todos') prefix += ` - ${cierreEncargado}`;
+      if (cierreEmpresa === 'Todas' && cierreEncargado === 'Todos') prefix = "Cierre General";
+      
       const nombreCiclo = `${prefix} - ${new Date().toLocaleDateString('es-ES', {day: 'numeric', month: 'short', year: 'numeric'})}`;
       
       const cicloRef = await addDoc(collection(db, "ciclos"), {
-        nombre: nombreCiclo, fecha: new Date().toISOString(), obras: obrasSanitizadas, totalObras: obrasSanitizadas.length, 
-        creadoPor: user.uid, empresaCierre: cierreEmpresa 
+        nombre: nombreCiclo, 
+        fecha: new Date().toISOString(), 
+        obras: obrasSanitizadas, 
+        totalObras: obrasSanitizadas.length, 
+        creadoPor: user.uid,
+        empresaCierre: cierreEmpresa,
+        encargadoCierre: cierreEncargado 
       });
 
       let batch = writeBatch(db);
@@ -411,11 +342,86 @@ export default function App() {
       if (count > 0) await batch.commit();
       
       setCierreEmpresa('Todas'); 
+      setCierreEncargado('Todos');
       showToast("¡Ciclo cerrado con éxito!", "success");
     } catch (error) {
       showToast("Error al procesar el cierre.", "error");
     }
   };
+
+  const handleImportarObras = async () => {
+    if (selectedObrasToImport.length === 0) return;
+    showToast("Importando expedientes...", "info");
+
+    try {
+        let batch = writeBatch(db);
+        const obrasToMoveRaw = obras.filter(o => selectedObrasToImport.includes(o.id));
+        
+        // Preparamos las obras cambiando su estado para que salgan del Panel Principal si eran pendientes
+        const obrasToMove = obrasToMoveRaw.map(o => ({
+            ...o,
+            estado: 'facturado',
+            cicloId: viewCiclo.id
+        }));
+
+        const updatedViewCicloObras = [...viewCiclo.obras, ...obrasToMove];
+        
+        batch.update(doc(db, "ciclos", viewCiclo.id), {
+            obras: updatedViewCicloObras,
+            totalObras: updatedViewCicloObras.length
+        });
+
+        const obrasByOldCiclo = {};
+        obrasToMoveRaw.forEach(o => {
+            if (o.cicloId && o.cicloId !== viewCiclo.id) {
+                if (!obrasByOldCiclo[o.cicloId]) obrasByOldCiclo[o.cicloId] = [];
+                obrasByOldCiclo[o.cicloId].push(o.id);
+            }
+        });
+
+        for (const oldCicloId of Object.keys(obrasByOldCiclo)) {
+            const oldCiclo = ciclos.find(c => c.id === oldCicloId);
+            if (oldCiclo) {
+                const remainingObras = oldCiclo.obras.filter(o => !obrasByOldCiclo[oldCicloId].includes(o.id));
+                batch.update(doc(db, "ciclos", oldCicloId), {
+                    obras: remainingObras,
+                    totalObras: remainingObras.length
+                });
+            }
+        }
+
+        obrasToMoveRaw.forEach(o => {
+            batch.update(doc(db, "obras", o.id), { 
+                cicloId: viewCiclo.id,
+                estado: 'facturado' // Las marcamos como facturadas para que no vuelvan a salir en pendientes
+            });
+        });
+
+        await batch.commit();
+
+        setViewCiclo({ ...viewCiclo, obras: updatedViewCicloObras, totalObras: updatedViewCicloObras.length });
+        setShowImportObrasModal(false);
+        setSelectedObrasToImport([]);
+        showToast("Expedientes importados al ciclo actual", "success");
+    } catch (error) {
+        console.error(error);
+        showToast("Error al importar expedientes", "error");
+    }
+  };
+
+  const subtotalFactura = useMemo(() => {
+    if (!viewCiclo || selectedForInvoice.length === 0) return 0;
+    return selectedForInvoice.reduce((sum, id) => {
+      const o = viewCiclo.obras.find(x => x.id === id);
+      if(!o) return sum;
+      const base = parseFloat(o.importe) || 0;
+      const plus = o.tieneRetencion ? base * 0.05 : 0;
+      const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+      return sum + base + plus + uuii;
+    }, 0);
+  }, [selectedForInvoice, viewCiclo]);
+
+  const effectiveSubtotalDisplay = invoiceForm.usarImporteManual ? (parseFloat(invoiceForm.importeManual) || 0) : subtotalFactura;
 
   const handleCreateFactura = async (e) => {
     e.preventDefault();
@@ -423,6 +429,18 @@ export default function App() {
 
     showToast("Generando factura...", "info");
     const clienteData = config.empresasFacturacion[invoiceForm.clienteIdx];
+    
+    const ppRate = parseFloat(invoiceForm.prontoPagoTipo) || 0;
+    const prontoPagoAmount = effectiveSubtotalDisplay * (ppRate / 100);
+    const descManualAmount = parseFloat(invoiceForm.descuentoManual) || 0;
+    
+    const baseImponibleNeta = effectiveSubtotalDisplay - prontoPagoAmount - descManualAmount;
+    const ivaAmount = baseImponibleNeta * 0.21;
+    
+    const retencionAmount = invoiceForm.retencion ? effectiveSubtotalDisplay * 0.05 : 0; 
+    
+    const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
+
     const obrasDetalle = selectedForInvoice.map(id => {
       const o = viewCiclo.obras.find(x => x.id === id);
       const base = parseFloat(o.importe) || 0;
@@ -431,29 +449,48 @@ export default function App() {
     });
 
     const facturaDoc = {
-      numFactura: invoiceForm.numFactura, fecha: invoiceForm.fecha, contrato: invoiceForm.numContrato,
-      pedido: invoiceForm.numPedido, cliente: clienteData, obras: obrasDetalle, subtotal: effectiveSubtotalDisplay,
-      retencion: retAmount, retencionSolicitada: false, prontoPago: ppAmount, prontoPagoTipo: ppRate,
-      descuentoManual: descManualAmount, iva: ivaAmount, total: totalAmount, formaPago: invoiceForm.formaPago,
-      cicloId: viewCiclo.id, createdAt: new Date().toISOString()
+      numFactura: invoiceForm.numFactura,
+      fecha: invoiceForm.fecha,
+      contrato: invoiceForm.numContrato,
+      pedido: invoiceForm.numPedido,
+      cliente: clienteData,
+      obras: obrasDetalle,
+      subtotal: effectiveSubtotalDisplay,
+      retencion: retencionAmount,
+      retencionSolicitada: false,
+      prontoPago: prontoPagoAmount,
+      prontoPagoTipo: ppRate,
+      descuentoManual: descManualAmount,
+      iva: ivaAmount,
+      total: totalAmount,
+      formaPago: invoiceForm.formaPago,
+      cicloId: viewCiclo.id,
+      createdAt: new Date().toISOString()
     };
 
     try {
       await addDoc(collection(db, "facturas"), facturaDoc);
 
       let batch = writeBatch(db);
-      selectedForInvoice.forEach(obraId => batch.update(doc(db, "obras", obraId), { numFactura: invoiceForm.numFactura }));
+      selectedForInvoice.forEach(obraId => {
+        batch.update(doc(db, "obras", obraId), { numFactura: invoiceForm.numFactura });
+      });
 
-      const updatedObrasCiclo = viewCiclo.obras.map(o => selectedForInvoice.includes(o.id) ? { ...o, numFactura: invoiceForm.numFactura } : o);
+      const updatedObrasCiclo = viewCiclo.obras.map(o => 
+        selectedForInvoice.includes(o.id) ? { ...o, numFactura: invoiceForm.numFactura } : o
+      );
       batch.update(doc(db, "ciclos", viewCiclo.id), { obras: updatedObrasCiclo });
+
       await batch.commit();
 
       setInvoiceModalOpen(false);
       setSelectedForInvoice([]);
       setViewCiclo({...viewCiclo, obras: updatedObrasCiclo}); 
+      
       setInvoiceForm({ ...invoiceForm, numFactura: '', numContrato: '', numPedido: '', retencion: false, prontoPagoTipo: '0', descuentoManual: '', usarImporteManual: false, importeManual: '' });
       showToast("Factura generada y asignada con éxito", "success");
       setActiveTab('facturas'); 
+      
     } catch (error) {
       console.error(error);
       showToast("Error al generar factura", "error");
@@ -466,20 +503,54 @@ export default function App() {
     if (!manualInvoiceForm.subtotal || parseFloat(manualInvoiceForm.subtotal) <= 0) return showToast("Falta importe bruto válido", "warning");
 
     showToast("Generando factura manual...", "info");
+    
     const clienteData = config.empresasFacturacion[manualInvoiceForm.clienteIdx] || { nombre: 'Cliente Genérico', cif: 'Desconocido', direccion: '' };
     
+    const subtotal = parseFloat(manualInvoiceForm.subtotal);
+    const ppRate = parseFloat(manualInvoiceForm.prontoPagoTipo) || 0;
+    const prontoPagoAmount = subtotal * (ppRate / 100);
+    const descManualAmount = parseFloat(manualInvoiceForm.descuentoManual) || 0;
+
+    const baseImponibleNeta = subtotal - prontoPagoAmount - descManualAmount;
+    const ivaAmount = baseImponibleNeta * 0.21;
+    const retencionAmount = manualInvoiceForm.retencion ? subtotal * 0.05 : 0; 
+    
+    const totalAmount = baseImponibleNeta + ivaAmount - retencionAmount;
+
     const facturaDoc = {
-      numFactura: manualInvoiceForm.numFactura, fecha: manualInvoiceForm.fecha, contrato: manualInvoiceForm.numContrato,
-      pedido: manualInvoiceForm.numPedido, cliente: clienteData, obras: [], subtotal: manualSubtotal,
-      retencion: manualRetAmount, retencionSolicitada: false, prontoPago: manualPpAmount, prontoPagoTipo: manualPpRate,
-      descuentoManual: manualDescManual, iva: manualIvaAmount, total: manualTotalAmount, formaPago: manualInvoiceForm.formaPago,
-      cicloId: 'manual', createdAt: new Date().toISOString()
+      numFactura: manualInvoiceForm.numFactura,
+      fecha: manualInvoiceForm.fecha,
+      contrato: manualInvoiceForm.numContrato,
+      pedido: manualInvoiceForm.numPedido,
+      cliente: clienteData,
+      obras: [], 
+      subtotal: subtotal,
+      retencion: retencionAmount,
+      retencionSolicitada: false,
+      prontoPago: prontoPagoAmount,
+      prontoPagoTipo: ppRate,
+      descuentoManual: descManualAmount,
+      iva: ivaAmount,
+      total: totalAmount,
+      formaPago: manualInvoiceForm.formaPago,
+      cicloId: 'manual', 
+      createdAt: new Date().toISOString()
     };
 
     try {
       await addDoc(collection(db, "facturas"), facturaDoc);
+      
       setManualInvoiceModalOpen(false);
-      setManualInvoiceForm({ ...manualInvoiceForm, numFactura: '', numContrato: '', numPedido: '', subtotal: '', retencion: true, prontoPagoTipo: '0', descuentoManual: '' });
+      setManualInvoiceForm({
+        ...manualInvoiceForm, 
+        numFactura: '', 
+        numContrato: '', 
+        numPedido: '', 
+        subtotal: '',
+        retencion: true,
+        prontoPagoTipo: '0',
+        descuentoManual: ''
+      });
       showToast("Factura manual generada con éxito", "success");
     } catch (error) {
       console.error(error);
@@ -489,7 +560,10 @@ export default function App() {
 
   const printSpecificInvoice = (factura) => {
     setInvoiceToPrint(factura);
-    setTimeout(() => { window.print(); setInvoiceToPrint(null); }, 500);
+    setTimeout(() => {
+      window.print();
+      setInvoiceToPrint(null);
+    }, 500);
   };
 
   const handleSyncOldInvoices = async () => {
@@ -510,16 +584,32 @@ export default function App() {
               if (clienteConfig) clienteData = clienteConfig;
 
               newFacturasMap[obra.numFactura] = {
-                numFactura: obra.numFactura, fecha: ciclo.fecha.split('T')[0], contrato: obra.contrato || '',
-                pedido: '', cliente: clienteData, obras: [], subtotal: 0, retencion: 0, retencionSolicitada: false,
-                prontoPago: 0, prontoPagoTipo: 0, descuentoManual: 0, iva: 0, total: 0, formaPago: 'CONFIRMING A 120 DÍAS',
-                cicloId: ciclo.id, createdAt: new Date().toISOString()
+                numFactura: obra.numFactura,
+                fecha: ciclo.fecha.split('T')[0],
+                contrato: obra.contrato || '',
+                pedido: '',
+                cliente: clienteData,
+                obras: [],
+                subtotal: 0,
+                retencion: 0,
+                retencionSolicitada: false,
+                prontoPago: 0,
+                prontoPagoTipo: 0,
+                descuentoManual: 0,
+                iva: 0,
+                total: 0,
+                formaPago: 'CONFIRMING A 120 DÍAS',
+                cicloId: ciclo.id,
+                createdAt: new Date().toISOString()
               };
             }
 
             const base = parseFloat(obra.importe) || 0;
             const totalLinea = base + (obra.tieneRetencion ? base * 0.05 : 0) + ((parseFloat(obra.uuii) || 0) * 1.5);
-            newFacturasMap[obra.numFactura].obras.push({ id: obra.id, idCarreras: obra.idCarreras, nombre: obra.nombre, total: totalLinea });
+            
+            newFacturasMap[obra.numFactura].obras.push({
+              id: obra.id, idCarreras: obra.idCarreras, nombre: obra.nombre, total: totalLinea
+            });
             newFacturasMap[obra.numFactura].subtotal += totalLinea;
           }
         });
@@ -534,8 +624,10 @@ export default function App() {
       let count = 0;
       for (const f of facturasToCreate) {
         f.retencion = f.subtotal * 0.05; 
+        f.prontoPago = 0;
         f.iva = f.subtotal * 0.21;
         f.total = f.subtotal - f.retencion + f.iva;
+
         batch.set(doc(collection(db, "facturas")), f);
         if (++count >= 400) { await batch.commit(); batch = writeBatch(db); count = 0; }
       }
@@ -555,9 +647,29 @@ export default function App() {
         const hoy = new Date().toISOString().split('T')[0];
 
         let estadoRetencion = 'en_espera';
-        if (f.retencionSolicitada) estadoRetencion = 'solicitada';
-        else if (hoy >= fechaElegibleStr) estadoRetencion = 'pendiente_solicitar';
+        if (f.retencionSolicitada) {
+          estadoRetencion = 'solicitada';
+        } else if (hoy >= fechaElegibleStr) {
+          estadoRetencion = 'pendiente_solicitar';
+        }
+
         return { ...f, fechaElegibleStr, estadoRetencion };
+      })
+      .sort((a, b) => {
+        const getNum = (str) => {
+          const match = String(str || "").match(/\d+/);
+          return match ? parseInt(match[0], 10) : 0;
+        };
+        const numA = getNum(a.numFactura);
+        const numB = getNum(b.numFactura);
+        
+        if (numA === numB) {
+          const yearA = parseInt(String(a.numFactura || "0").split('-')[2] || "0", 10);
+          const yearB = parseInt(String(b.numFactura || "0").split('-')[2] || "0", 10);
+          return yearA - yearB;
+        }
+        
+        return numA - numB;
       });
   }, [facturas]);
 
@@ -569,9 +681,14 @@ export default function App() {
   const handleMarcarRetencion = async (id) => {
     if (!confirm("¿Confirmas que ya has reclamado el cobro de esta retención?")) return;
     try {
-      await updateDoc(doc(db, "facturas", id), { retencionSolicitada: true, fechaSolicitudRetencion: new Date().toISOString() });
+      await updateDoc(doc(db, "facturas", id), { 
+        retencionSolicitada: true,
+        fechaSolicitudRetencion: new Date().toISOString()
+      });
       showToast("Retención marcada como Solicitada", "success");
-    } catch (error) { showToast("Error al actualizar la retención", "error"); }
+    } catch (error) {
+      showToast("Error al actualizar la retención", "error");
+    }
   };
 
   const handleUpdateFacturaCiclo = async (obraId, currentFactura) => {
@@ -602,12 +719,13 @@ export default function App() {
 
   const handleDelete = async (id) => {
     if (confirm("⚠️ ¿Eliminar expediente?")) {
-      try { await deleteDoc(doc(db, "obras", id)); showToast("Eliminado", "success"); } 
-      catch (error) { showToast("Error al eliminar", "error"); }
+      try {
+        await deleteDoc(doc(db, "obras", id));
+        showToast("Eliminado", "success");
+      } catch (error) { showToast("Error al eliminar", "error"); }
     }
   };
 
-  // --- BOTÓN EDITAR (100% SEGURO) ---
   const handleEdit = (obra) => {
     try {
       setEditingObra(obra);
@@ -644,8 +762,9 @@ export default function App() {
     if (action === 'add') newList.push(value);
     else if (action === 'delete') newList = newList.filter(item => item !== value);
     setConfig(prev => ({ ...prev, [type]: newList }));
-    try { await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList }); } 
-    catch (error) { showToast("Error config", 'error'); }
+    try {
+      await setDoc(doc(db, "configuracion", "listas_generales"), { ...config, [type]: newList });
+    } catch (error) { showToast("Error config", 'error'); }
   };
 
   const handleExportBackup = () => {
@@ -655,7 +774,9 @@ export default function App() {
     const link = document.createElement('a');
     link.href = url;
     link.download = `backup_Gestión_de_Obras_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleImportBackup = (e) => {
@@ -675,7 +796,8 @@ export default function App() {
         showToast(`Completado`, "success");
       } catch (error) { showToast("Archivo inválido", "error"); }
     };
-    reader.readAsText(file); e.target.value = '';
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const sourceData = useMemo(() => {
@@ -711,6 +833,7 @@ export default function App() {
       }
       return matchSearch;
     });
+
     return filtered.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   }, [sourceData, searchQuery, activeTab, reportFilter, navState, viewCiclo]);
 
@@ -719,7 +842,10 @@ export default function App() {
     const iva = base * 0.21;
     const plus = obrasFiltradas.reduce((acc, curr) => acc + (curr.tieneRetencion ? (parseFloat(curr.importe) * 0.05) : 0), 0);
     const uuii = obrasFiltradas.reduce((acc, curr) => acc + ((parseFloat(curr.uuii) || 0) * 1.50), 0);
-    return { base, iva, plus, uuii, totalConIva: base + iva + plus + uuii, totalSinIva: base + plus + uuii, totalBasePlus: base + plus };
+    const totalConIva = base + iva + plus + uuii;
+    const totalSinIva = base + plus + uuii;
+    const totalBasePlus = base + plus;
+    return { base, iva, plus, uuii, totalConIva, totalSinIva, totalBasePlus };
   }, [obrasFiltradas]);
 
   const treeData = useMemo(() => {
@@ -750,6 +876,45 @@ export default function App() {
     if (activeTab !== 'cierres') { setViewCiclo(null); setSelectedForInvoice([]); }
   }, [activeTab]);
 
+  const clientesDisponibles = useMemo(() => [...new Set(facturas.map(f => f.cliente?.nombre).filter(Boolean))], [facturas]);
+  const facturasFiltradasReport = useMemo(() => facturas.filter(f => {
+    if (facturasReportClientFilter === 'Todos') return true;
+    return f.cliente?.nombre === facturasReportClientFilter;
+  }), [facturas, facturasReportClientFilter]);
+  
+  const todasFacturasSeleccionadas = facturasFiltradasReport.length > 0 && facturasFiltradasReport.every(f => selectedFacturasReport.includes(f.id));
+
+  const mesesDisponibles = useMemo(() => [...new Set(ciclos.map(c => new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'})))], [ciclos]);
+  const ciclosFiltradosReport = useMemo(() => ciclos.filter(c => {
+    if (reportMonthFilter === 'Todos') return true;
+    return new Date(c.fecha).toLocaleDateString('es-ES', {month: 'long', year: 'numeric'}) === reportMonthFilter;
+  }), [ciclos, reportMonthFilter]);
+  
+  const todosCiclosSeleccionados = ciclosFiltradosReport.length > 0 && ciclosFiltradosReport.every(c => selectedCiclosReport.includes(c.id));
+
+  const facturasPrintTotals = useMemo(() => {
+    if (!facturasToPrint) return { base: 0, iva: 0, total: 0 };
+    return facturasToPrint.reduce((acc, f) => {
+      const bNet = f.subtotal - (f.prontoPago || 0) - (f.descuentoManual || 0);
+      return { base: acc.base + bNet, iva: acc.iva + f.iva, total: acc.total + f.total };
+    }, { base: 0, iva: 0, total: 0 });
+  }, [facturasToPrint]);
+
+  const ciclosPrintTotals = useMemo(() => {
+    if (!multiCicloToPrint) return { expedientes: 0, base: 0, retenciones: 0, final: 0 };
+    return multiCicloToPrint.reduce((acc, c) => {
+      let exp = 0, b = 0, ret = 0, fin = 0;
+      (c.obras || []).forEach(o => {
+        exp++;
+        const base = parseFloat(o.importe) || 0;
+        const plus = o.tieneRetencion ? base * 0.05 : 0;
+        const uuii = (parseFloat(o.uuii) || 0) * 1.5;
+        b += base; ret += plus; fin += (base + plus + uuii);
+      });
+      return { expedientes: acc.expedientes + exp, base: acc.base + b, retenciones: acc.retenciones + ret, final: acc.final + fin };
+    }, { expedientes: 0, base: 0, retenciones: 0, final: 0 });
+  }, [multiCicloToPrint]);
+
   const isPrintingDoc = invoiceToPrint || facturasToPrint || multiCicloToPrint;
 
   return (
@@ -773,6 +938,7 @@ export default function App() {
         .print-header, .invoice-wrapper { display: none; }
       `}</style>
 
+      {}
       {/* PLANTILLAS IMPRESION */}
       {facturasToPrint && (
         <div className="invoice-wrapper bg-white text-black font-sans absolute top-0 left-0 w-full z-50 min-h-screen">
@@ -906,7 +1072,7 @@ export default function App() {
         </div>
       )}
 
-      {/* INTERFAZ PRINCIPAL */}
+      {}
       <aside className="bg-[#1a1a1a] text-white w-full md:w-64 flex-shrink-0 flex flex-col shadow-2xl z-20 print:hidden hide-on-invoice-print">
         <div className="p-6 border-b border-gray-800 flex items-center gap-3">
           <img src="./logo-redes_Transparente-216x216.png" className="h-10 w-10 brightness-0 invert" alt="Logo" onError={(e) => e.target.style.display='none'} />
@@ -928,7 +1094,10 @@ export default function App() {
              <img src="./logo-redes_Transparente-216x216.png" style={{height: '80px', width: 'auto', objectFit: 'contain'}} alt="Logo" />
              <div><h1 className="text-3xl font-bold text-gray-900 leading-none">REDES CARRERAS S.L.</h1><p className="text-base text-gray-600 mt-1">Informe de Gestión</p></div>
           </div>
-          <div className="text-right text-xs text-gray-500"><p className="font-bold">{new Date().toLocaleDateString()}</p>{viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}</div>
+          <div className="text-right text-xs text-gray-500">
+             <p className="font-bold">{new Date().toLocaleDateString()}</p>
+             {viewCiclo && <p>Ciclo: {viewCiclo.nombre}</p>}
+          </div>
         </div>
 
         <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10 no-print">
@@ -1124,8 +1293,7 @@ export default function App() {
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center no-print">
                 <button onClick={() => setViewCiclo(null)} className="flex items-center gap-2 text-gray-600 hover:text-red-600 font-bold"><ArrowLeft size={18}/> Volver al Historial</button>
                 <div className="flex items-center gap-4">
-                  <select className="input-filter" value={reportFilter.empresa} onChange={(e) => setReportFilter({...reportFilter, empresa: e.target.value})}><option value="Todas">Todas</option>{config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}</select>
-                  <select className="input-filter" value={reportFilter.encargado} onChange={(e) => setReportFilter({...reportFilter, encargado: e.target.value})}><option value="Todos">Todos los Encargados</option>{config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                  <button onClick={() => setShowImportObrasModal(true)} className="px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all bg-blue-100 text-blue-700 hover:bg-blue-200"><FolderOpen size={16} /> Importar Pendientes</button>
                   <button onClick={handlePrint} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-200 font-bold"><Printer size={16} /> Imprimir Lote</button>
                   <button disabled={selectedForInvoice.length === 0} onClick={() => setInvoiceModalOpen(true)} className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-bold shadow-md transition-all ${selectedForInvoice.length > 0 ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><FileSpreadsheet size={16} /> Generar Factura ({selectedForInvoice.length})</button>
                 </div>
@@ -1420,352 +1588,123 @@ export default function App() {
         </div>
       </main>
 
-      {/* --- MODALES O VENTANAS EMERGENTES --- */}
+      {}
+      {/* MODAL IMPORTAR OBRAS A CICLO */}
+      {showImportObrasModal && (() => {
+        const obrasDisponiblesParaImportar = obras.filter(o => 
+          (!o.numFactura || o.numFactura === '') && 
+          ((o.estado === 'facturado' && o.cicloId !== viewCiclo?.id) || o.estado === 'pendiente')
+        );
 
-      {/* MODAL OBRA */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
-            <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg">{editingObra ? 'Editar Expediente' : 'Nuevo Expediente'}</h3>
-              <button onClick={() => setModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleSaveObra} className="p-6 overflow-y-auto flex flex-col gap-5">
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay">
+            <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="bg-blue-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2"><FolderOpen size={20}/> Importar Expedientes a este Ciclo</h3>
+                  <p className="text-xs text-blue-200 font-medium mt-1">Trae expedientes de otros ciclos o directamente del Panel Principal (Pendientes).</p>
+                </div>
+                <button onClick={() => { setShowImportObrasModal(false); setSelectedObrasToImport([]); }}><X className="text-blue-200 hover:text-white"/></button>
+              </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputGroup label="ID Carreras *">
-                  <input required className="input-field border-gray-300 font-bold" value={formData.idCarreras} onChange={e => setFormData({...formData, idCarreras: e.target.value})} placeholder="Ej. 12345" />
-                </InputGroup>
-                <InputGroup label="ID Obra (Opcional)">
-                  <input className="input-field" value={formData.idObra} onChange={e => setFormData({...formData, idObra: e.target.value})} placeholder="Ej. OB-001" />
-                </InputGroup>
+              <div className="p-6 flex flex-col gap-4 overflow-hidden h-full">
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-xl relative">
+                  <table className="w-full text-sm text-left relative">
+                    <thead className="bg-gray-100 text-gray-600 font-bold sticky top-0 border-b border-gray-200 text-xs uppercase z-10 shadow-sm">
+                      <tr>
+                        <th className="px-4 py-3 text-center w-12">
+                          <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" 
+                            checked={obrasDisponiblesParaImportar.length > 0 && selectedObrasToImport.length === obrasDisponiblesParaImportar.length} 
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedObrasToImport(obrasDisponiblesParaImportar.map(o => o.id));
+                              else setSelectedObrasToImport([]);
+                          }}/>
+                        </th>
+                        <th className="px-4 py-3">Fecha</th>
+                        <th className="px-4 py-3">ID / Obra</th>
+                        <th className="px-4 py-3">Cliente / Encargado</th>
+                        <th className="px-4 py-3 text-right">Importe Base</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {obrasDisponiblesParaImportar.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-400 italic">No hay expedientes pendientes de facturar.</td></tr>}
+                      {obrasDisponiblesParaImportar.map(o => (
+                        <tr key={o.id} className={`cursor-pointer transition-colors ${selectedObrasToImport.includes(o.id) ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`} 
+                          onClick={() => {
+                            if (selectedObrasToImport.includes(o.id)) setSelectedObrasToImport(selectedObrasToImport.filter(id => id !== o.id));
+                            else setSelectedObrasToImport([...selectedObrasToImport, o.id]);
+                          }}>
+                          <td className="px-4 py-3 text-center">
+                            <input type="checkbox" className="w-4 h-4 rounded text-blue-600 cursor-pointer" checked={selectedObrasToImport.includes(o.id)} readOnly />
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">{new Date(o.fecha).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            <span className="font-mono font-bold text-gray-700 block">{o.idCarreras}</span>
+                            <span className="text-xs text-gray-500 line-clamp-1">{o.nombre}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-bold text-gray-800 block">{o.cliente}</span>
+                            <span className="text-xs text-gray-500">{o.encargado}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-900">
+                            {Number(o.importe).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <InputGroup label="Nombre / Descripción de los trabajos *">
-                <input required className="input-field" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} placeholder="Descripción del trabajo..." />
-              </InputGroup>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <InputGroup label="Empresa (Cliente) *">
-                  <select required className="input-field" value={formData.cliente} onChange={e => setFormData({...formData, cliente: e.target.value})}>
-                    <option value="">Seleccionar...</option>
-                    {config.empresas?.map(emp => <option key={emp} value={emp}>{emp}</option>)}
-                  </select>
-                </InputGroup>
-                <InputGroup label="Encargado *">
-                  <select required className="input-field" value={formData.encargado} onChange={e => setFormData({...formData, encargado: e.target.value})}>
-                    <option value="">Seleccionar...</option>
-                    {config.encargados?.map(enc => <option key={enc} value={enc}>{enc}</option>)}
-                  </select>
-                </InputGroup>
-                <InputGroup label="Central / Zona">
-                  <input className="input-field" list="centrales-list" value={formData.central} onChange={e => setFormData({...formData, central: e.target.value})} placeholder="Buscar o escribir central..." />
-                  <datalist id="centrales-list">
-                    {[...(config.centrales || [])].filter(c => typeof c === 'string').sort((a, b) => a.localeCompare(b)).map(cen => (
-                      <option key={cen} value={cen} />
-                    ))}
-                  </datalist>
-                </InputGroup>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <InputGroup label="Contrato">
-                  <select className="input-field" value={formData.contrato} onChange={e => setFormData({...formData, contrato: e.target.value})}>
-                    <option value="">Seleccionar...</option>
-                    {config.contratos?.map(con => <option key={con} value={con}>{con}</option>)}
-                  </select>
-                </InputGroup>
-                <InputGroup label="Fecha *">
-                  <input type="date" required className="input-field" value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
-                </InputGroup>
-                <InputGroup label="Importe Base (€) *">
-                  <input type="number" step="0.01" required className="input-field font-black text-gray-900 border-2 border-gray-300" value={formData.importe} onChange={e => setFormData({...formData, importe: e.target.value})} />
-                </InputGroup>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                <InputGroup label="UUII Extras (€)">
-                  <input type="number" step="0.01" className="input-field" value={formData.uuii} onChange={e => setFormData({...formData, uuii: e.target.value})} placeholder="0.00" />
-                </InputGroup>
-                <label className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors h-[42px]">
-                  <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={formData.tieneRetencion} onChange={e => setFormData({...formData, tieneRetencion: e.target.checked})} />
-                  <span className="font-bold text-gray-700 text-sm">Aplicar 5% Retención (Plus)</span>
-                </label>
-              </div>
-
-              <InputGroup label="Observaciones">
-                <textarea rows={2} className="input-field resize-none" value={formData.observaciones} onChange={e => setFormData({...formData, observaciones: e.target.value})} placeholder="Notas adicionales..." />
-              </InputGroup>
-
-              <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex justify-between items-center mt-2">
-                <span className="text-sm font-bold text-blue-800">Total Expediente (Base + 5% + UUII):</span>
-                <span className="text-lg font-black text-blue-900">
-                  {((parseFloat(formData.importe) || 0) + 
-                    (formData.tieneRetencion ? (parseFloat(formData.importe) || 0) * 0.05 : 0) + 
-                    ((parseFloat(formData.uuii) || 0) * 1.5)).toLocaleString('es-ES', {minimumFractionDigits: 2})} €
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
+                <span className="text-sm text-gray-600 font-bold bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+                  <span className="text-blue-600">{selectedObrasToImport.length}</span> expedientes seleccionados
                 </span>
-              </div>
-
-              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
-                <button type="button" onClick={() => setModalOpen(false)} className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">Cancelar</button>
-                <button type="submit" className="px-8 py-2 rounded-lg text-white font-bold bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-2"><Save size={18}/> {editingObra ? 'Actualizar Obra' : 'Guardar Obra'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CREACIÓN FACTURA OFICIAL DESDE CICLO */}
-      {invoiceModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
-          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
-            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-xl font-bold flex items-center gap-2"><Receipt size={22}/> Emisión de Factura</h3>
-                <p className="text-xs text-red-200">Se van a facturar {selectedForInvoice.length} expedientes.</p>
-              </div>
-              <button onClick={() => setInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
-            </div>
-            
-            <form onSubmit={handleCreateFactura} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="space-y-4">
-                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
-                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
-                    <select className="input-field border-gray-300 font-bold" value={invoiceForm.clienteIdx} onChange={e => setInvoiceForm({...invoiceForm, clienteIdx: e.target.value})}>
-                      {config.empresasFacturacion?.map((emp, i) => (
-                        <option key={i} value={i}>{emp.nombre}</option>
-                      ))}
-                    </select>
-                  </InputGroup>
-                  {config.empresasFacturacion && config.empresasFacturacion[invoiceForm.clienteIdx] && (
-                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
-                      <p><strong>CIF:</strong> {config.empresasFacturacion[invoiceForm.clienteIdx].cif}</p>
-                      <p className="whitespace-pre-line">{config.empresasFacturacion[invoiceForm.clienteIdx].direccion}</p>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-4">
-                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={invoiceForm.numFactura} onChange={e => setInvoiceForm({...invoiceForm, numFactura: e.target.value})} placeholder="Ej. 38-06-26" /></InputGroup>
-                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={invoiceForm.fecha} onChange={e => setInvoiceForm({...invoiceForm, fecha: e.target.value})} /></InputGroup>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={invoiceForm.numContrato} onChange={e => setInvoiceForm({...invoiceForm, numContrato: e.target.value})} placeholder="Ej. 509/86200" /></InputGroup>
-                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={invoiceForm.numPedido} onChange={e => setInvoiceForm({...invoiceForm, numPedido: e.target.value})} placeholder="Ej. PED-2026" /></InputGroup>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Condiciones Comerciales</h4>
-                   
-                   <InputGroup label="Forma de Pago Estipulada">
-                      <select className="input-field bg-gray-100 font-medium" value={invoiceForm.formaPago} onChange={e => setInvoiceForm({...invoiceForm, formaPago: e.target.value})}>
-                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
-                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
-                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
-                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
-                      </select>
-                   </InputGroup>
-                   
-                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={invoiceForm.retencion} onChange={e => setInvoiceForm({...invoiceForm, retencion: e.target.checked})} />
-                     <div><span className="font-bold text-red-900 block text-sm">Aplicar 5% de Retención</span></div>
-                   </label>
-                   
-                   <div className="grid grid-cols-2 gap-4">
-                     <InputGroup label="Descuento Pronto Pago">
-                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={invoiceForm.prontoPagoTipo} onChange={e => setInvoiceForm({...invoiceForm, prontoPagoTipo: e.target.value})}>
-                         <option value="0">Ninguno (0%)</option>
-                         <option value="2.5">Aplicar 2,5%</option>
-                         <option value="5">Aplicar 5%</option>
-                       </select>
-                     </InputGroup>
-                     
-                     <InputGroup label="Descuento Manual (€)">
-                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={invoiceForm.descuentoManual} onChange={e => setInvoiceForm({...invoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
-                     </InputGroup>
-                   </div>
-
-                   <label className="flex items-center gap-3 p-3 mt-4 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-                     <input type="checkbox" className="w-5 h-5 text-gray-600 rounded" checked={invoiceForm.usarImporteManual} onChange={e => {
-                        const isChecked = e.target.checked;
-                        setInvoiceForm({...invoiceForm, usarImporteManual: isChecked, importeManual: isChecked ? subtotalFactura : ''})
-                     }} />
-                     <div>
-                       <span className="font-bold text-gray-900 block text-sm">Modificar Importe Bruto Manualmente</span>
-                       <span className="text-[10px] text-gray-500 leading-none">Permite ajustar el importe base si sumas conceptos extra.</span>
-                     </div>
-                   </label>
-
-                   {invoiceForm.usarImporteManual && (
-                     <div className="pt-2 animate-in fade-in slide-in-from-top-2">
-                       <InputGroup label="Total Bruto Personalizado (€)">
-                         <input type="number" step="0.01" required={invoiceForm.usarImporteManual} className="input-field border-gray-300 font-bold text-lg text-gray-900" value={invoiceForm.importeManual} onChange={e => setInvoiceForm({...invoiceForm, importeManual: e.target.value})} />
-                       </InputGroup>
-                     </div>
-                   )}
-                 </div>
-
-                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
-                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
-                    <div className="space-y-3 font-mono text-sm">
-                      <div className="flex justify-between items-center text-gray-300">
-                        <span>TOTAL BRUTO:</span>
-                        <span className="font-bold text-white text-lg">{effectiveSubtotalDisplay.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                      </div>
-                      {ppAmount > 0 && <div className="flex justify-between items-center text-blue-400"><span>{ppRate}% PRONTO PAGO:</span><span>-{ppAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {descManualAmount > 0 && <div className="flex justify-between items-center text-purple-400"><span>DESCUENTO EXTRA:</span><span>-{descManualAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {(ppAmount > 0 || descManualAmount > 0) && <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2"><span>BASE IMPONIBLE NETA:</span><span>{baseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {invoiceForm.retencion && <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2"><span>5% RETENCIÓN:</span><span>-{retAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2"><span>IVA 21%:</span><span>{ivaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-                      <div className="flex justify-between items-center pt-2 text-green-400">
-                        <span className="font-black text-lg">A COBRAR:</span>
-                        <span className="font-black text-2xl">{totalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span>
-                      </div>
-                    </div>
-                 </div>
-              </div>
-              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
-                <p className="text-xs text-gray-500 italic">* Revisa que el Nº Factura no exista previamente. Esta acción es irreversible.</p>
                 <div className="flex gap-3">
-                  <button type="button" onClick={() => setInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
-                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Emitir Factura Oficial</button>
+                  <button onClick={() => { setShowImportObrasModal(false); setSelectedObrasToImport([]); }} className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-white transition-colors">Cancelar</button>
+                  <button disabled={selectedObrasToImport.length === 0} onClick={handleImportarObras} className={`px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-md transition-all ${selectedObrasToImport.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                    <FolderOpen size={18}/> Mover a este Ciclo
+                  </button>
                 </div>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL AÑADIR FACTURA MANUAL */}
-      {manualInvoiceModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print modal-overlay overflow-y-auto">
-          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh]">
-            <div className="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-xl font-bold flex items-center gap-2"><Plus size={22}/> Añadir Factura Manual</h3>
-                <p className="text-xs text-red-200">Rellena huecos de facturación. Si marcas retención, aparecerá en tu listado.</p>
-              </div>
-              <button onClick={() => setManualInvoiceModalOpen(false)}><X className="text-red-200 hover:text-white"/></button>
             </div>
-            
-            <form onSubmit={handleCreateManualInvoice} className="p-6 overflow-y-auto flex flex-col gap-6 bg-gray-50">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="space-y-4">
-                  <h4 className="font-bold text-gray-700 border-b pb-2">1. Datos del Cliente</h4>
-                  <InputGroup label="Facturar A (Seleccionar de Ajustes)">
-                    <select className="input-field border-gray-300 font-bold" value={manualInvoiceForm.clienteIdx} onChange={e => setManualInvoiceForm({...manualInvoiceForm, clienteIdx: e.target.value})}>
-                      {config.empresasFacturacion?.map((emp, i) => (
-                        <option key={i} value={i}>{emp.nombre}</option>
-                      ))}
-                    </select>
-                  </InputGroup>
-                  {config.empresasFacturacion && config.empresasFacturacion[manualInvoiceForm.clienteIdx] && (
-                    <div className="bg-gray-50 p-3 rounded border border-gray-100 text-xs text-gray-600">
-                      <p><strong>CIF:</strong> {config.empresasFacturacion[manualInvoiceForm.clienteIdx].cif}</p>
-                      <p className="whitespace-pre-line">{config.empresasFacturacion[manualInvoiceForm.clienteIdx].direccion}</p>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-4">
-                  <h4 className="font-bold text-gray-700 border-b pb-2">2. Identificación de Factura</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputGroup label="Nº de Factura *"><input required className="input-field border-red-300 bg-red-50 text-red-900 font-bold" value={manualInvoiceForm.numFactura} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numFactura: e.target.value})} placeholder="Ej. 02-01-26" /></InputGroup>
-                    <InputGroup label="Fecha Emisión *"><input type="date" required className="input-field" value={manualInvoiceForm.fecha} onChange={e => setManualInvoiceForm({...manualInvoiceForm, fecha: e.target.value})} /></InputGroup>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputGroup label="Nº Contrato (Opcional)"><input className="input-field" value={manualInvoiceForm.numContrato} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numContrato: e.target.value})} placeholder="Opcional..." /></InputGroup>
-                    <InputGroup label="Nº Pedido (Opcional)"><input className="input-field" value={manualInvoiceForm.numPedido} onChange={e => setManualInvoiceForm({...manualInvoiceForm, numPedido: e.target.value})} placeholder="Opcional..." /></InputGroup>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-                   <h4 className="font-bold text-gray-700 border-b pb-2">3. Importes y Condiciones</h4>
-                   
-                   <InputGroup label="Importe Bruto (€) *">
-                     <input type="number" step="0.01" required className="input-field border-gray-300 font-bold text-lg text-gray-900" value={manualInvoiceForm.subtotal} onChange={e => setManualInvoiceForm({...manualInvoiceForm, subtotal: e.target.value})} placeholder="0.00" />
-                   </InputGroup>
-
-                   <InputGroup label="Forma de Pago Estipulada">
-                      <select className="input-field bg-gray-100 font-medium" value={manualInvoiceForm.formaPago} onChange={e => setManualInvoiceForm({...manualInvoiceForm, formaPago: e.target.value})}>
-                        <option value="CONFIRMING A 120 DÍAS">CONFIRMING A 120 DÍAS</option>
-                        <option value="CONFIRMING A 90 DÍAS">CONFIRMING A 90 DÍAS</option>
-                        <option value="CONFIRMING A 60 DÍAS">CONFIRMING A 60 DÍAS</option>
-                        <option value="PAGO TRANSFERENCIA BANCARIA">PAGO TRANSFERENCIA BANCARIA</option>
-                      </select>
-                   </InputGroup>
-                   
-                   <label className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors mt-2">
-                     <input type="checkbox" className="w-5 h-5 text-red-600 rounded" checked={manualInvoiceForm.retencion} onChange={e => setManualInvoiceForm({...manualInvoiceForm, retencion: e.target.checked})} />
-                     <div><span className="font-bold text-red-900 block text-sm">Generar 5% de Retención</span></div>
-                   </label>
-                   
-                   <div className="grid grid-cols-2 gap-4">
-                     <InputGroup label="Descuento Pronto Pago">
-                       <select className="input-field bg-blue-50 border-blue-200 font-bold text-blue-900" value={manualInvoiceForm.prontoPagoTipo} onChange={e => setManualInvoiceForm({...manualInvoiceForm, prontoPagoTipo: e.target.value})}>
-                         <option value="0">Ninguno (0%)</option><option value="2.5">Aplicar 2,5%</option><option value="5">Aplicar 5%</option>
-                       </select>
-                     </InputGroup>
-                     <InputGroup label="Descuento Manual (€)">
-                       <input type="number" step="0.01" className="input-field border-purple-200 bg-purple-50 text-purple-900 font-bold" value={manualInvoiceForm.descuentoManual} onChange={e => setManualInvoiceForm({...manualInvoiceForm, descuentoManual: e.target.value})} placeholder="Ej: 50.00" />
-                     </InputGroup>
-                   </div>
-                 </div>
-
-                 <div className="bg-gray-900 text-white p-6 rounded-xl shadow-lg border border-gray-800 flex flex-col justify-center">
-                    <h4 className="font-bold text-gray-400 border-b border-gray-700 pb-2 mb-4 uppercase text-xs tracking-wider">4. Resumen Liquidación</h4>
-                    <div className="space-y-3 font-mono text-sm">
-                      <div className="flex justify-between items-center text-gray-300"><span>TOTAL BRUTO:</span><span className="font-bold text-white text-lg">{manualSubtotal.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-                      {manualPpAmount > 0 && <div className="flex justify-between items-center text-blue-400"><span>{manualPpRate}% PRONTO PAGO:</span><span>-{manualPpAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {manualDescManual > 0 && <div className="flex justify-between items-center text-purple-400"><span>DESCUENTO EXTRA:</span><span>-{manualDescManual.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {(manualPpAmount > 0 || manualDescManual > 0) && <div className="flex justify-between items-center text-gray-200 font-bold border-t border-gray-700 pt-2 mt-2"><span>BASE IMPONIBLE NETA:</span><span>{manualBaseNet.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      {manualInvoiceForm.retencion && <div className="flex justify-between items-center text-red-400 border-t border-gray-700 pt-2 mt-2"><span>5% RETENCIÓN:</span><span>-{manualRetAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>}
-                      <div className="flex justify-between items-center text-gray-300 border-b border-gray-700 pb-3 pt-2"><span>IVA 21%:</span><span>{manualIvaAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-                      <div className="flex justify-between items-center pt-2 text-green-400"><span className="font-black text-lg">A COBRAR:</span><span className="font-black text-2xl">{manualTotalAmount.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</span></div>
-                    </div>
-                 </div>
-              </div>
-              <div className="pt-4 flex justify-between items-center border-t border-gray-200">
-                <p className="text-xs text-gray-500 italic">Esta factura se añadirá a tu base de datos global y módulos fiscales.</p>
-                <div className="flex gap-3">
-                  <button type="button" onClick={() => setManualInvoiceModalOpen(false)} className="px-6 py-3 rounded-lg border border-gray-300 text-gray-700 font-bold hover:bg-gray-200">Cancelar</button>
-                  <button type="submit" className="px-8 py-3 rounded-lg text-white font-black shadow-xl shadow-red-200/50 flex items-center gap-2 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-lg"><CheckSquare size={20}/> Guardar Factura Manual</button>
-                </div>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* CONFIRMAR CIERRE */}
       {confirmCierre && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
             <h3 className="text-xl font-bold text-gray-900 mb-2">¿Cerrar Ciclo de Facturación?</h3>
-            <p className="text-sm text-gray-600 mb-4">Selecciona qué empresa deseas incluir en este cierre.</p>
+            <p className="text-sm text-gray-600 mb-4">Selecciona qué empresa y/o encargado deseas incluir en este cierre.</p>
             
-            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 rounded-xl">
-              <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Empresa:</label>
-              <select className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium" value={cierreEmpresa} onChange={e => setCierreEmpresa(e.target.value)}>
-                <option value="Todas">Todas las Empresas (Cierre General)</option>
-                {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
-              </select>
-              <div className="mt-3 flex justify-between items-center text-sm">
+            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 rounded-xl space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Empresa:</label>
+                <select className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium" value={cierreEmpresa} onChange={e => setCierreEmpresa(e.target.value)}>
+                  <option value="Todas">Todas las Empresas (Cierre General)</option>
+                  {config.empresas?.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-700 uppercase block mb-2">Filtrar por Encargado:</label>
+                <select className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500 font-medium" value={cierreEncargado} onChange={e => setCierreEncargado(e.target.value)}>
+                  <option value="Todos">Todos los Encargados</option>
+                  {config.encargados?.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+              </div>
+              
+              <div className="pt-3 border-t border-gray-200 flex justify-between items-center text-sm mt-4">
                 <span className="text-gray-500">Expedientes a cerrar:</span>
                 <span className="font-black text-red-600 text-lg">
-                  {obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa)).length}
+                  {obras.filter(o => o.estado === 'pendiente' && (cierreEmpresa === 'Todas' || o.cliente === cierreEmpresa) && (cierreEncargado === 'Todos' || o.encargado === cierreEncargado)).length}
                 </span>
               </div>
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => { setConfirmCierre(false); setCierreEmpresa('Todas'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
+              <button onClick={() => { setConfirmCierre(false); setCierreEmpresa('Todas'); setCierreEncargado('Todos'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
               <button onClick={handleCerrarCiclo} className="flex-1 py-2.5 rounded-lg bg-red-600 font-bold text-white hover:bg-red-700 transition-colors">Confirmar Cierre</button>
             </div>
           </div>
